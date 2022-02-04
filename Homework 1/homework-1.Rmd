@@ -85,3 +85,258 @@ pairs(Auto[, 1:8], cex = 0.5)
 cor(Auto[, 1:8])
 ```
 
+
+### (c)
+
+
+```{r}
+fit <- lm(mpg ~ . - name, data = Auto)
+summary(fit)
+```
+
+
++ i. According to the global test on the null hypothesis $H_0: \beta_1 = \beta_2 = … = \beta_p = 0$, the $F-statistic = 252.4$ on 7 and 384 df, leading to a $p-value < 2.2e-16$. Thus, we reject the null hypothesis on a significance level of $\alpha = 0.05$ and conclude that there is a significant relationship between the predictors and the response.
+
+
++ ii. According to the t-value and associated p-value of the regression coefficients for each predictor, `displacement`, `weight`, `year`, and `origin` are statistically significantly associated with the response, under a significance level of $\alpha = 0.05$.
+
+
++ iii. The $\beta$ coefficient of `year` suggests that, with 1 unit increase in `year`, there are 0.75 unit increase in `mpg`, holding `cylinders`, `displacement`, `horsepower`, `weight`, `acceleration`, and `origin` constant.
+
+
+### (d)
+
+
+```{r}
+par(mfrow = c(2,2))
+plot(fit)
+```
+
+
++ The residuals vs. fitted plot with the associated lowess smooth curve show some non-linear pattern of the data, especially in the tail. The plot may suggest a polynomial regression, instead of a linear regression, may provide a better fit of the data. Some points, such as #323, #327, may be outliers and impact the estimation of the parameters (the fit of the line to the data).
+
+
++ The normal Q-Q plot shows, mostly, residuals follow a normal distribution, but in the right tail of the distribution there are some right skewness patterns, indicating the normal distribution of residuals assumption may be violated.
+
+
++ The scale-location plot shows the line is roughly horizontal, while the residuals show a slight funnel pattern, as their variation slightly increase as the fitted values increase, indicating the equal variance assumption may not hold.
+
+
++ The residuals vs leverage plot does not show any points outside the Cook's distance lines. However, point #14 still has a unusual high leverage relative to its standardized residual, indicating it may impact the estimation of the parameters (the fit of the line to the data).
+
+
+### (e)
+
+
+```{r}
+lm(mpg ~ . - name + acceleration*year + horsepower*weight, data = Auto) %>%
+    summary()
+```
+
+
+```{r}
+lm(mpg ~ . - name + acceleration:year + horsepower:weight, data = Auto) %>%
+    summary()
+```
+
+
++ The above two models show identical output, however generally, the colon (:) is used to indicate an interaction between two or more variables in model formula; while the asterisk (*) is use to indicate all main effects and interactions among the variables that it joins. [^1]
+
+[^1]: https://www.stat.berkeley.edu/~s133/Aov1a.html#:~:text=To%20express%20the%20idea%20of,the%20variables%20that%20it%20joins.
+
+
++ The interaction terms `acceleration:year` and `horsepower:weight` are both statistically significant under a significance level $\alpha = 0.05$. The model accuracy increased, as shown the increased $R^2$ of the interaction model compared to the original model.
+
+
+### (f)
+
+
+Exploration of predictor transformation:
+
+
+```{r}
+# apply log transformation for each predictor
+names(Auto[2:8]) %>% 
+    map_dfr(~ tibble(
+        `log transformation` = .x,
+        `r squared` = (lm(mpg ~ . - name - get(.x) + log(get(.x)), data = Auto)
+                       %>% summary())$r.squared
+    )) %>% 
+    knitr::kable()
+```
+
+
+$log(X)$ transforming `horsepower` or `weight` improve model accuracy according to the $R^2$ values, compared to the original model which $R^2 = 0.8215$.
+
+
+```{r}
+# apply sqrt transformation for each predictor
+names(Auto[2:8]) %>% 
+    map_dfr(~ tibble(
+        `log transformation` = .x,
+        `r squared` = (lm(mpg ~ . - name - get(.x) + sqrt(get(.x)), data = Auto)
+                       %>% summary())$r.squared
+    )) %>% 
+    knitr::kable()
+```
+
+
+$\sqrt{X}$ transforming `displacement`, `horsepower`, or `weight` improve model accuracy according to the $R^2$ values, compared to the original model which $R^2 = 0.8215$.
+
+
+```{r}
+# apply polynomial transformation for each predictor
+names(Auto[2:8]) %>% 
+    map_dfr(~ tibble(
+        `log transformation` = .x,
+        `r squared` = (lm(mpg ~ . - name - get(.x) + I(get(.x)^2), data = Auto)
+                       %>% summary())$r.squared
+    )) %>% 
+    knitr::kable()
+```
+
+
+$X^2$ transforming `displacement`, `horsepower`, or `weight` improve model accuracy according to the $R^2$ values, compared to the original model which $R^2 = 0.8215$.
+
+
+```{r}
+# combine interaction terms and transformation
+lm(mpg ~ . - name - horsepower - weight - displacement
+   + acceleration:year + sqrt(horsepower)*sqrt(weight) + log(displacement),
+   data = Auto) %>%
+    summary()
+```
+
+
+The above regression output shows that: combining interaction terms and transformation on predictors, the model accuracy increases as the model flexibility increases — the above model results in a $R^2 = 0.875$, compared to the original model which $R^2 = 0.8215$. Compared to the original model, the $\beta$ coefficients of more predictors reach statistical significance under $\alpha = 0.05$.
+
+
+## Problem 15
+
+
+```{r}
+Boston <- MASS::Boston
+```
+
+
+### (a)
+
+
+```{r}
+names(Boston[2:ncol(Boston)]) %>% 
+    map_dfr(~ tibble(
+        `predictor` = .x,
+        `Estimate` = (lm(crim ~ get(.x), data = Boston) %>%
+                          summary())$coefficients[2,1] %>% round(3),
+        `Std. Error` = (lm(crim ~ get(.x), data = Boston) %>%
+                            summary())$coefficients[2,2] %>% round(3),
+        `t value` = (lm(crim ~ get(.x), data = Boston) %>%
+                         summary())$coefficients[2,3] %>% round(3),
+        `Pr(>|t|)` = (lm(crim ~ get(.x), data = Boston) %>%
+                          summary())$coefficients[2,4]
+    )) %>% 
+    mutate(`Significant` = ifelse(`Pr(>|t|)` < 0.05, "*", "")) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+Boston %>% 
+    pivot_longer(cols = -crim,
+                 names_to = "predictor",
+                 values_to = "value") %>% 
+    ggplot(aes(x = value, y = crim)) +
+    facet_wrap(~ predictor, scales = "free") +
+    geom_point() + 
+    geom_smooth(method = "lm") +
+    xlab("predictor") + 
+    theme_bw()
+```
+
+
+According to the regression output, all predictors except `chas` showed a significant association with the outcome `crim`, under significance level $\alpha = 0.05$.
+
+
+### (b)
+
+
+```{r}
+fit <- lm(crim ~ ., data = Boston)
+summary(fit)
+```
+
+
+According to the output above, global test rejects the null hypothesis that $H_0: \beta_1 = \beta_2 = … = \beta_p = 0$, and the resulting $R^2 = 0.454$.
+
+
+Under a significance level of $\alpha = 0.05$, we can reject the null hypothesis $H_0: \beta_j = 0$ for the following predictors: `zn`, `dis`, `rad`, `black`, `medv`.
+
+
+### (c)
+
+
+```{r}
+# data cleaning
+single.coefficient <- names(Boston[2:ncol(Boston)]) %>% 
+    map_dfr(~ tibble(
+        `predictor` = .x,
+        `single.estimate` = (lm(crim ~ get(.x), data = Boston) %>%
+                          summary())$coefficients[2,1]
+    ))
+
+multiple.coefficient <- tibble(
+    `predictor` = fit$coefficients %>% 
+        names(),
+    `multiple.estimate` = fit$coefficients
+)
+
+combine.coefficient <- single.coefficient %>% 
+    left_join(multiple.coefficient, by = "predictor")
+```
+
+
+```{r}
+# plotting the coefficients
+combine.coefficient %>% 
+    ggplot(aes(x = single.estimate, y = multiple.estimate)) + 
+    geom_point() +
+    xlab("Coefficient of Single Linear Regression Model") +
+    ylab("Coefficient of Multiple Linear Regression Model") +
+    theme_bw()
+```
+
+
+Compared to univariate regression model, multiple regression coefficients represent the change associated with each predictor holding all other predictors constant. Direction of some of the coefficients estimates changed compared to the univariate model, after adjusting for the value of other predictors.
+
+
+### (d)
+
+
+```{r}
+# check class of each predictor
+skimr::skim(Boston)
+```
+
+
+```{r}
+# `chas` is a binary variable and should be removed from polynomial regression
+names(Boston[2:ncol(Boston)])[- 3] %>% 
+    map_dfr(~ tibble(
+        `predictor` = .x,
+        `p-value x` = (lm(crim ~ poly(get(.x), 3), data = Boston) %>% 
+    summary())$coefficients[2,4],
+        `p-value x^2` = (lm(crim ~ poly(get(.x), 3), data = Boston) %>% 
+    summary())$coefficients[3,4],
+        `p-value x^3` = (lm(crim ~ poly(get(.x), 3), data = Boston) %>% 
+    summary())$coefficients[4,4])) %>% 
+    mutate(`Significant x` = ifelse(`p-value x` < 0.05, "*", ""),
+           `Significant x^2` = ifelse(`p-value x^2` < 0.05, "*", ""),
+           `Significant x^3` = ifelse(`p-value x^3` < 0.05, "*", "")) %>% 
+    select(predictor, `p-value x`, `Significant x`, `p-value x^2`,
+           `Significant x^2`, `p-value x^3`, `Significant x^3`) %>% 
+    knitr::kable()
+```
+
+
+According to the regression output above, for a significance level of $\alpha = 0.05$, the $\beta$ coefficients for all predictors are statistically significant on $X$ level. The $\beta$ coefficients for all predictors except `black` are statistically significant on $X^2$ level (quadratic). The $\beta$ coefficients for predictors `indus`, `nox`, `age`, `dis`, `ptratio`, `medv` are significant on $X^3$ level (cubic). Thus, there is evidence for a non-linear relationship for all predictors except `black`.
+
