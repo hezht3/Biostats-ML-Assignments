@@ -1,0 +1,87 @@
+---
+title: "Homework 1"
+author: "Zhengting (Johnathan) He"
+date: "2022/2/3"
+output:
+  pdf_document: 
+    latex_engine: lualatex
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message = FALSE, results = "hide"}
+# set up
+require(tidyverse)
+require(ISLR)
+```
+
+
+# Linear regression ISL: 3.7
+
+
+## Problem 5
+
+
+According to the information provided,
+
+
+$$
+\hat{y_i} = x_i * \hat{\beta} \\ = x_i * \frac{\sum_{i=1}^n{x_iy_i}}{\sum_{i'=1}^n{x_{i'}^2}} \\
+= x_i * \frac{\sum_{i'=1}^n{x_i'y_i'}}{\sum_{j=1}^n{x_{j}^2}} \\
+= \sum_{i'=1}^n{(\frac{x_i'*x_i}{\sum_{j=1}^n{x_{j}^2}}*y_i')}
+$$
+
+
+Thus,
+
+
+$$
+a_i' = \frac{x_i'*x_i}{\sum_{j=1}^n{x_{j}^2}}
+$$
+
+
+## Problem 6
+
+
+According to $(3.4)$, the regression line given by least square approach - in a simple linear regression case - is:
+
+
+$$
+y = \hat{\beta_1}*x + \hat{\beta_0} = \hat{\beta_1}*x + (\bar{y} - \hat{\beta_1}*\bar{x})
+$$
+
+
+Which is equivalent to the line:
+
+
+$$
+\hat{\beta_1}*(x - \bar{x}) + (\bar{y} - y) = 0
+$$
+
+
+Since $\hat{\beta_1}*(\bar{x} - \bar{x}) + (\bar{y} - \bar{y}) = 0$, $(\bar{x}, \bar{y})$ is a solution to the above equation. In other words, the least square line always passes through the point $(\bar{x}, \bar{y})$.
+
+
+## Problem 9
+
+
+### (a)
+
+
+```{r}
+pairs(Auto[, 1:8], cex = 0.5)
+```
+
+
+### (b)
+
+
+```{r}
+cor(Auto[, 1:8])
+```
+
