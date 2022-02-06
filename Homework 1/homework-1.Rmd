@@ -8,15 +8,21 @@ output:
   html_document: default
   word_document: default
 ---
+\fontsize{8}{6}
+\fontseries{b}
+\selectfont
+
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
 ```
 
 
 ```{r, message = FALSE, results = "hide"}
 # set up
 require(tidyverse)
+require(tidymodels)
+require(discrim)
 require(ISLR)
 ```
 
@@ -82,7 +88,19 @@ pairs(Auto[, 1:8], cex = 0.5)
 
 
 ```{r}
-cor(Auto[, 1:8])
+Auto %>% 
+    select(- name) %>% 
+    corrr::correlate() %>% 
+    knitr::kable(digits = 4)
+```
+
+
+```{r, fig.width = 4, fig.height = 3}
+Auto %>% 
+    select(- name) %>% 
+    corrr::correlate() %>% 
+    corrr::rplot(colours = c("indianred2", "black", "skyblue1")) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1))
 ```
 
 
@@ -90,8 +108,12 @@ cor(Auto[, 1:8])
 
 
 ```{r}
-fit <- lm(mpg ~ . - name, data = Auto)
-summary(fit)
+linear_model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression") %>% 
+    fit(mpg ~ . - name, data = Auto)
+
+linear_model %>% pluck("fit") %>% summary()
 ```
 
 
@@ -107,9 +129,9 @@ summary(fit)
 ### (d)
 
 
-```{r}
+```{r, fig.width = 6, fig.height = 4}
 par(mfrow = c(2,2))
-plot(fit)
+plot(linear_model %>% pluck("fit"))
 ```
 
 
@@ -129,14 +151,22 @@ plot(fit)
 
 
 ```{r}
-lm(mpg ~ . - name + acceleration*year + horsepower*weight, data = Auto) %>%
-    summary()
+linear_model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression") %>% 
+    fit(mpg ~ . - name + acceleration*year + horsepower*weight, data = Auto)
+
+linear_model %>% pluck("fit") %>% summary()
 ```
 
 
 ```{r}
-lm(mpg ~ . - name + acceleration:year + horsepower:weight, data = Auto) %>%
-    summary()
+linear_model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression") %>% 
+    fit(mpg ~ . - name + acceleration:year + horsepower:weight, data = Auto)
+
+linear_model %>% pluck("fit") %>% summary()
 ```
 
 
@@ -173,7 +203,7 @@ $log(X)$ transforming `horsepower` or `weight` improve model accuracy according 
 # apply sqrt transformation for each predictor
 names(Auto[2:8]) %>% 
     map_dfr(~ tibble(
-        `log transformation` = .x,
+        `sqrt transformation` = .x,
         `r squared` = (lm(mpg ~ . - name - get(.x) + sqrt(get(.x)), data = Auto)
                        %>% summary())$r.squared
     )) %>% 
@@ -188,7 +218,7 @@ $\sqrt{X}$ transforming `displacement`, `horsepower`, or `weight` improve model 
 # apply polynomial transformation for each predictor
 names(Auto[2:8]) %>% 
     map_dfr(~ tibble(
-        `log transformation` = .x,
+        `quadratic transformation` = .x,
         `r squared` = (lm(mpg ~ . - name - get(.x) + I(get(.x)^2), data = Auto)
                        %>% summary())$r.squared
     )) %>% 
@@ -201,10 +231,14 @@ $X^2$ transforming `displacement`, `horsepower`, or `weight` improve model accur
 
 ```{r}
 # combine interaction terms and transformation
-lm(mpg ~ . - name - horsepower - weight - displacement
-   + acceleration:year + sqrt(horsepower)*sqrt(weight) + log(displacement),
-   data = Auto) %>%
-    summary()
+linear_model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression") %>% 
+    fit(mpg ~ . - name - horsepower - weight - displacement
+        + acceleration:year + sqrt(horsepower)*sqrt(weight) + log(displacement),
+        data = Auto)
+
+linear_model %>% pluck("fit") %>% summary()
 ```
 
 
@@ -240,7 +274,7 @@ names(Boston[2:ncol(Boston)]) %>%
 ```
 
 
-```{r}
+```{r, fig.width = 7, fig.height = 5}
 Boston %>% 
     pivot_longer(cols = -crim,
                  names_to = "predictor",
@@ -261,8 +295,12 @@ According to the regression output, all predictors except `chas` showed a signif
 
 
 ```{r}
-fit <- lm(crim ~ ., data = Boston)
-summary(fit)
+linear_model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression") %>% 
+    fit(crim ~ ., data = Boston)
+
+linear_model %>% pluck("fit") %>% summary()
 ```
 
 
@@ -285,9 +323,9 @@ single.coefficient <- names(Boston[2:ncol(Boston)]) %>%
     ))
 
 multiple.coefficient <- tibble(
-    `predictor` = fit$coefficients %>% 
+    `predictor` = (linear_model %>% pluck("fit"))$coefficients %>% 
         names(),
-    `multiple.estimate` = fit$coefficients
+    `multiple.estimate` = (linear_model %>% pluck("fit"))$coefficients
 )
 
 combine.coefficient <- single.coefficient %>% 
@@ -295,7 +333,7 @@ combine.coefficient <- single.coefficient %>%
 ```
 
 
-```{r}
+```{r, fig.width = 5, fig.height = 3}
 # plotting the coefficients
 combine.coefficient %>% 
     ggplot(aes(x = single.estimate, y = multiple.estimate)) + 
@@ -339,4 +377,652 @@ names(Boston[2:ncol(Boston)])[- 3] %>%
 
 
 According to the regression output above, for a significance level of $\alpha = 0.05$, the $\beta$ coefficients for all predictors are statistically significant on $X$ level. The $\beta$ coefficients for all predictors except `black` are statistically significant on $X^2$ level (quadratic). The $\beta$ coefficients for predictors `indus`, `nox`, `age`, `dis`, `ptratio`, `medv` are significant on $X^3$ level (cubic). Thus, there is evidence for a non-linear relationship for all predictors except `black`.
+
+
+# Classification ISL: 4.7
+
+
+## Problem 1
+
+
+$$
+p(X) = \frac{e^{\beta_0 + \beta_1X}}{1 + e^{\beta_0 + \beta_1X}}
+$$
+
+
+$$
+p(X) + p(X)*e^{\beta_0 + \beta_1X} = e^{\beta_0 + \beta_1X}
+$$
+
+
+$$
+p(X) = (1 - p(X)) * e^{\beta_0 + \beta_1X}
+$$
+
+
+$$
+\frac{p(X)}{1-p(X)} = e^{\beta_0 + \beta_1X}
+$$
+
+
+## Problem 8
+
+
++ For model selection, we want to choose the method that gives the lowest test error rate, as opposed to the lowest training error rate.
+
++ For 1-nearest neighbors ($K = 1$) method, the nearest neighbor is the point itself,
+
+$$
+Pr(Y = j | X = x_i) = \frac{1}{K}\sum_{i \in N_0}{I(y_i = j)} = I(y_i = j) = \left\{\begin{aligned}
+1 \text{   , if } y_i = j \\
+0 \text{   , if } y_i \not = j
+\end{aligned}
+\right.
+$$
+
+  - This will result in a error rate = 0% in the training dataset.
+  - Since the average error rate is 18%, the error rate in the testing dataset is 36%.
+  
++ For logistic regression method, the error rate in the testing dataset is 30%.
+
++ Based on the smaller test error rate, we prefer logistic regression for classification of new observations.
+
+
+## Problem 10
+
+
+### (a)
+
+
+```{r}
+skimr::skim(Weekly)
+```
+
+
+```{r}
+Weekly %>% 
+    select(- Direction) %>% 
+    corrr::correlate() %>% 
+    knitr::kable(digits = 4)
+```
+
+
+```{r, fig.width = 4.5, fig.height = 2}
+Weekly %>% 
+    select(- Direction) %>% 
+    corrr::correlate() %>% 
+    corrr::rplot(colours = c("indianred2", "black", "skyblue1")) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+```{r}
+pairs(Weekly[, 1:8], cex = 0.5)
+```
+
+
+As shown in the correlation matrix and pairwise scatterplot above, there is an increasing trend of number of shares traded on the previous day (`volumn`) over time (`year`) ($r = 0.84$). There are no apparent trend or correlation between the rest variables. Percentage returns for previous trading days (`Lag1`, `Lag2`, `Lag3`, `Lag4`, `Lag5`) are similar as the percentage return on the data in question (`today`), and the correlations are nearly zero. There are no apparent trend of percentage returns (`Lag1`, `Lag2`, `Lag3`, `Lag4`, `Lag5`, `today`) over time (`year`).
+
+
+### (b)
+
+
+```{r}
+# fit logistic regression model
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, data = Weekly)
+```
+
+
+```{r}
+logistic_model %>% 
+    tidy() %>% 
+    knitr::kable()
+```
+
+
+Under a significance level of $\alpha = 0.05$, the only predictor appear to be statistically significant is `Lag2`.
+
+
+### (c)
+
+
+```{r}
+# confusion matrix
+augment(logistic_model, new_data = Weekly) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(logistic_model, new_data = Weekly) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# sensitivity
+augment(logistic_model, new_data = Weekly) %>% 
+    sens(truth = Direction, estimate = .pred_class, event_level = "second") %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# specificity
+augment(logistic_model, new_data = Weekly) %>% 
+    spec(truth = Direction, estimate = .pred_class, event_level = "second") %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# precision
+augment(logistic_model, new_data = Weekly) %>% 
+    precision(truth = Direction, estimate = .pred_class, event_level = "second") %>% 
+    knitr::kable()
+```
+
+
+
++ As shown by the output above, the overall fraction of correct predictions is 56.11%.
+
++ Considering class-specific fraction of correct predictions, the sensitivity (proportion of true "Up" days identified) is relatively high - 92.07%, well the specificity (proportion of true "Down" days identified) is rather low - 11.16%, indicating a large error rate in prediction of "Down" class.
+
++ Precision (positive predicted value, proportion of those predicted as "Up" direction that are truely "Up" direction) is 56.43%, just slightly better than random guessing due to change (proportion of "Up" days: 605/1089 = 55.6%), indicating the prediction precision is low.
+
++ Above results are the performance of the same training data, which will overestimate the accuracy in external data for testing.
+
+
+### (d)
+
+
+```{r}
+# train and test split
+Weekly_train <- Weekly %>% filter(Year %in% c(1990:2008))
+Weekly_test <- Weekly %>% filter(Year %in% c(2009:2010))
+```
+
+
+```{r}
+# fit logistic regression model
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(Direction ~ Lag2, data = Weekly_train)
+```
+
+
+```{r}
+# confusion matrix
+augment(logistic_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(logistic_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ The overall fraction of correct predictions for the held out data is 62.5%.
+
+
+### (e)
+
+
+```{r}
+# fit linear discriminant analysis model
+lda_model <- discrim_linear() %>%
+    set_engine("MASS") %>% 
+    set_mode("classification") %>%
+    fit(Direction ~ Lag2, data = Weekly_train)
+lda_model
+```
+
+
+```{r}
+# confusion matrix
+augment(lda_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(lda_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ The overall fraction of correct predictions for the held out data is 62.5%.
+
+
+### (f)
+
+
+```{r}
+# fit quadratic discriminant analysis model
+qda_model <- discrim_quad() %>% 
+    set_engine("MASS") %>% 
+    set_mode("classification") %>% 
+    fit(Direction ~ Lag2, data = Weekly_train)
+qda_model
+```
+
+
+```{r}
+# confusion matrix
+augment(qda_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(qda_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ The overall fraction of correct predictions for the held out data is 58.65%.
+
+
+### (g)
+
+
+```{r}
+# fit K nearest neighbors model
+knn_model <- nearest_neighbor(neighbors = 1) %>%
+    set_mode("classification") %>%
+    set_engine("kknn") %>% 
+    fit(Direction ~ Lag2, data = Weekly_train)
+knn_model
+```
+
+
+```{r}
+# confusion matrix
+augment(knn_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(knn_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ The overall fraction of correct predictions for the held out data is 50%.
+
+
+### (h)
+
+
+According to the confustion matrix and error rate in testing dataset, for predicting "Up" days, logistic regression and linear discriminant analysis provide the best results on this data, followed by quadratic discriminant analysis, while K nearest neighbors provide highest test error rates.
+
+
+### (i)
+
+
+```{r}
+# logistic regression model, sqrt term of Lag1
+logistic.m_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(Direction ~ Lag2 + sqrt(abs(Lag1)), data = Weekly_train)
+
+augment(logistic.m_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+augment(logistic.m_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ Overall accuracy in testing data increased to 63.5% when including sqrt term of `Lag1`.
+
+
+```{r}
+# logistic regression model, quadratic term of Lag1
+logistic.m_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(Direction ~ Lag2 + I(Lag1^2), data = Weekly_train)
+
+augment(logistic.m_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+augment(logistic.m_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ Overall accuracy in testing data increased to 64.4% when including quadratic term of `Lag1`.
+
+
+```{r}
+# LDA, include all Lag as predictors
+lda.m_model <- discrim_linear() %>%
+    set_engine("MASS") %>% 
+    set_mode("classification") %>%
+    fit(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5, data = Weekly_train)
+
+# confusion matrix
+augment(lda.m_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(lda.m_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ No significant improvement on model accuracy when including all `Lag` as predictors.
+
+
+```{r}
+# LDA, interaction terms
+lda.m_model <- discrim_linear() %>%
+    set_engine("MASS") %>% 
+    set_mode("classification") %>%
+    fit(Direction ~ Lag2*Lag3, data = Weekly_train)
+
+# confusion matrix
+augment(lda.m_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(lda.m_model, new_data = Weekly_test) %>% 
+    accuracy(truth = Direction, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
++ Overall accuracy in testing data increased to 62.5% when including interaction term of `Lag2` and `Lag3`.
+
+
+```{r}
+# apply K = 1:10 to KNN classifier, output confusion matrix and overall accuracy
+KNN.K_model <- c(1:10) %>% 
+    map(~ nearest_neighbor(neighbors = .x) %>%
+        set_mode("classification") %>%
+        set_engine("kknn") %>% 
+        fit(Direction ~ Lag2, data = Weekly_train))
+
+KNN.K_performance <- KNN.K_model %>% 
+    map_dfr(~ tibble(
+        `pred.down true.down` = (augment(.x, new_data = Weekly_test) %>% 
+        conf_mat(truth = Direction, estimate = .pred_class))$table[1],
+        `pred.up true.down` = (augment(.x, new_data = Weekly_test) %>% 
+        conf_mat(truth = Direction, estimate = .pred_class))$table[2],
+        `pred.down true.up` = (augment(.x, new_data = Weekly_test) %>% 
+        conf_mat(truth = Direction, estimate = .pred_class))$table[3],
+        `pred.up true.up` = (augment(.x, new_data = Weekly_test) %>% 
+        conf_mat(truth = Direction, estimate = .pred_class))$table[4],
+        `overall accuracy` = (augment(.x, new_data = Weekly_test) %>% 
+        accuracy(truth = Direction, estimate = .pred_class))$.estimate
+    ))
+
+tibble(`K` = c(1:10)) %>% 
+    bind_cols(KNN.K_performance) %>% 
+    knitr::kable()
+```
+
+
++ $K = 3$ or $K = 4$ provides the best results on the held out data - test accuracy of 55.77%. The confusion matrix is:
+
+```{r}
+KNN.K_model <- nearest_neighbor(neighbors = 3) %>%
+    set_mode("classification") %>%
+    set_engine("kknn") %>% 
+    fit(Direction ~ Lag2, data = Weekly_train)
+
+augment(KNN.K_model, new_data = Weekly_test) %>% 
+    conf_mat(truth = Direction, estimate = .pred_class)
+```
+
+
+## Problem 11
+
+
+### (a)
+
+
+```{r}
+# create binary indicator variable
+Auto <- Auto %>% 
+    mutate(mpg01 = ifelse(mpg > median(mpg, na.rm = TRUE), 1, 0))
+```
+
+
+### (b)
+
+
+```{r}
+# correlation matrix
+Auto %>% 
+    mutate(mpg01 = as.numeric(mpg01)) %>% 
+    select(- mpg, - name) %>% 
+    corrr::correlate()
+```
+
+
+```{r}
+# scatterplot
+pairs(Auto[2:10], cex = 0.5)
+```
+
+
+```{r}
+# code dependent variable as factor
+Auto <- Auto %>% 
+    mutate(mpg01 = recode_factor(mpg01, "0" = "0", "1" = "1"))
+```
+
+
+```{r, fig.width = 5, fig.height = 4}
+# boxplot
+Auto %>% 
+    select(-mpg, -name) %>% 
+    mutate(mpg01 = recode_factor(mpg01, "0" = "0", "1" = "1")) %>% 
+    pivot_longer(cols = -mpg01,
+                 names_to = "predictor",
+                 values_to = "value") %>% 
+    ggplot(aes(x = mpg01, y = value)) +
+    geom_boxplot() +
+    facet_wrap(~ predictor, scales = "free") +
+    theme_bw()
+```
+
+
+According to the correlation matrix, scatterplot, and boxplot, there are negative relationships with relative high correlations between `cylinders`, `displacement`, `horsepower`, `weight` and `mpg01`. `acceleration`, `year`, `origin` and `mpg01` show some positive relationships, but the correlations are relatively low.
+
+
+### (c)
+
+
+```{r}
+# split the training and testing on a 8:2 ratio, mpg01 as strata
+set.seed(2022)
+Auto_split <- initial_split(Auto, strata = mpg01, prop = 0.8)
+Auto_train <- training(Auto_split)
+Auto_test <- testing(Auto_split)
+```
+
+
+### (d)
+
+
+```{r}
+# fit linear discriminant analysis model
+lda_model <- discrim_linear() %>%
+    set_engine("MASS") %>% 
+    set_mode("classification") %>%
+    fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train)
+lda_model
+```
+
+
+```{r}
+# confusion matrix
+augment(lda_model, new_data = Auto_test) %>% 
+    conf_mat(truth = mpg01, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(lda_model, new_data = Auto_test) %>% 
+    accuracy(truth = mpg01, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The overall accuracy is 91.25%, indicating the total test error of the model obtained is 1 - 91.25% = 8.75%.
+
+
+### (e)
+
+
+```{r}
+# fit quadratic discriminant analysis model
+qda_model <- discrim_quad() %>% 
+    set_engine("MASS") %>% 
+    set_mode("classification") %>% 
+    fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train)
+qda_model
+```
+
+
+```{r}
+# confusion matrix
+augment(qda_model, new_data = Auto_test) %>% 
+    conf_mat(truth = mpg01, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(qda_model, new_data = Auto_test) %>% 
+    accuracy(truth = mpg01, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The overall accuracy is 93.75%, indicating the total test error of the model obtained is 1 - 93.75% = 6.25%.
+
+
+### (f)
+
+
+```{r}
+# fit logistic regression model
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train)
+logistic_model %>% tidy()
+```
+
+
+```{r}
+# confusion matrix
+augment(logistic_model, new_data = Auto_test) %>% 
+    conf_mat(truth = mpg01, estimate = .pred_class)
+```
+
+
+```{r}
+# overall accuracy
+augment(logistic_model, new_data = Auto_test) %>% 
+    accuracy(truth = mpg01, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The overall accuracy is 88.75%, indicating the total test error of the model obtained is 1 - 88.75% = 11.25%.
+
+
+### (g)
+
+
+```{r}
+# apply K = 1:30 to KNN classifier, output confusion matrix and overall accuracy
+KNN.K_model <- c(1:30) %>% 
+    map(~ nearest_neighbor(neighbors = .x) %>%
+        set_mode("classification") %>%
+        set_engine("kknn") %>% 
+        fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train))
+
+KNN.K_performance <- KNN.K_model %>% 
+    map_dfr(~ tibble(
+        `pred.down true.down` = (augment(.x, new_data = Auto_test) %>% 
+        conf_mat(truth = mpg01, estimate = .pred_class))$table[1],
+        `pred.up true.down` = (augment(.x, new_data = Auto_test) %>% 
+        conf_mat(truth = mpg01, estimate = .pred_class))$table[2],
+        `pred.down true.up` = (augment(.x, new_data = Auto_test) %>% 
+        conf_mat(truth = mpg01, estimate = .pred_class))$table[3],
+        `pred.up true.up` = (augment(.x, new_data = Auto_test) %>% 
+        conf_mat(truth = mpg01, estimate = .pred_class))$table[4],
+        `overall accuracy` = (augment(.x, new_data = Auto_test) %>% 
+        accuracy(truth = mpg01, estimate = .pred_class))$.estimate
+    ))
+
+tibble(`K` = c(1:30)) %>% 
+    bind_cols(KNN.K_performance) %>% 
+    mutate(`test errors` = 1 - `overall accuracy`) %>% 
+    knitr::kable()
+```
+
+
+As shown in the table above, the lowest test error obtained is 6.25% when $K = 25$. $K = 25$ seems to perform the best on this data set. (As $K$ increase from 1 to 25, the associated test error increase; as $K$ increase from 25 to 30, there seems to be a diminish return that the associated test error becomes stable)
+
+
+The confusion matrix and overall accuracy for KNN method when $K=25$ is outputted below:
+
+
+```{r}
+KNN_model <- nearest_neighbor(neighbors = 25) %>%
+    set_mode("classification") %>%
+    set_engine("kknn") %>% 
+    fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train)
+
+augment(KNN_model, new_data = Auto_test) %>% 
+    conf_mat(truth = mpg01, estimate = .pred_class)
+```
+
+
+```{r}
+augment(KNN_model, new_data = Auto_test) %>% 
+    accuracy(truth = mpg01, estimate = .pred_class) %>% 
+    knitr::kable()
+```
 
