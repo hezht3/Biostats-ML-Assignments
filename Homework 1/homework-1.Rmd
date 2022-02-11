@@ -112,7 +112,6 @@ linear_model <- linear_reg() %>%
     set_engine("lm") %>% 
     set_mode("regression") %>% 
     fit(mpg ~ . - name, data = Auto)
-
 linear_model %>% pluck("fit") %>% summary()
 ```
 
@@ -155,7 +154,6 @@ linear_model <- linear_reg() %>%
     set_engine("lm") %>% 
     set_mode("regression") %>% 
     fit(mpg ~ . - name + acceleration*year + horsepower*weight, data = Auto)
-
 linear_model %>% pluck("fit") %>% summary()
 ```
 
@@ -165,7 +163,6 @@ linear_model <- linear_reg() %>%
     set_engine("lm") %>% 
     set_mode("regression") %>% 
     fit(mpg ~ . - name + acceleration:year + horsepower:weight, data = Auto)
-
 linear_model %>% pluck("fit") %>% summary()
 ```
 
@@ -237,7 +234,6 @@ linear_model <- linear_reg() %>%
     fit(mpg ~ . - name - horsepower - weight - displacement
         + acceleration:year + sqrt(horsepower)*sqrt(weight) + log(displacement),
         data = Auto)
-
 linear_model %>% pluck("fit") %>% summary()
 ```
 
@@ -299,7 +295,6 @@ linear_model <- linear_reg() %>%
     set_engine("lm") %>% 
     set_mode("regression") %>% 
     fit(crim ~ ., data = Boston)
-
 linear_model %>% pluck("fit") %>% summary()
 ```
 
@@ -321,13 +316,11 @@ single.coefficient <- names(Boston[2:ncol(Boston)]) %>%
         `single.estimate` = (lm(crim ~ get(.x), data = Boston) %>%
                           summary())$coefficients[2,1]
     ))
-
 multiple.coefficient <- tibble(
     `predictor` = (linear_model %>% pluck("fit"))$coefficients %>% 
         names(),
     `multiple.estimate` = (linear_model %>% pluck("fit"))$coefficients
 )
-
 combine.coefficient <- single.coefficient %>% 
     left_join(multiple.coefficient, by = "predictor")
 ```
@@ -412,10 +405,6 @@ $$
 
 + For 1-nearest neighbors ($K = 1$) method, the nearest neighbor is the point itself,
 
-  - This will result in a error rate = 0% in the training dataset.
-  
-  - Since the average error rate is 18%, the error rate in the testing dataset is 36%.
-
 $$
 Pr(Y = j | X = x_i) = \frac{1}{K}\sum_{i \in N_0}{I(y_i = j)} = I(y_i = j) = \left\{\begin{aligned}
 1 \text{   , if } y_i = j \\
@@ -423,6 +412,9 @@ Pr(Y = j | X = x_i) = \frac{1}{K}\sum_{i \in N_0}{I(y_i = j)} = I(y_i = j) = \le
 \end{aligned}
 \right.
 $$
+
+  - This will result in a error rate = 0% in the training dataset.
+  - Since the average error rate is 18%, the error rate in the testing dataset is 36%.
   
 + For logistic regression method, the error rate in the testing dataset is 30%.
 
@@ -479,8 +471,8 @@ logistic_model <- logistic_reg() %>%
 
 ```{r}
 logistic_model %>% 
-    pluck("fit") %>% 
-    summary()
+    tidy() %>% 
+    knitr::kable()
 ```
 
 
@@ -641,11 +633,6 @@ augment(qda_model, new_data = Weekly_test) %>%
 ### (g)
 
 
-**I noticed that {tidymodel} package only allows `kknn::kknn()` function for K nearest neighbors, which output may be different from `class::knn()` function.[^2] Below shows the results from `kknn::kknn()` function.**
-
-[^2]: https://stackoverflow.com/questions/69955405/why-does-the-classknn-function-give-different-results-from-kknnkknn
-
-
 ```{r}
 # fit K nearest neighbors model
 knn_model <- nearest_neighbor(neighbors = 1) %>%
@@ -674,20 +661,6 @@ augment(knn_model, new_data = Weekly_test) %>%
 + The overall fraction of correct predictions for the held out data is 50%.
 
 
-**Below shows the results from `class::knn()` function.**
-
-
-```{r}
-require(class)
-set.seed(1)
-knn.prediction = knn(as.matrix(Weekly_train$Lag2), as.matrix(Weekly_test$Lag2), Weekly_train$Direction, k = 1)
-table(knn.prediction, Weekly_test$Direction)
-```
-
-
-+ The overall fraction of correct predictions for the held out data is 50%.
-
-
 ### (h)
 
 
@@ -703,7 +676,6 @@ logistic.m_model <- logistic_reg() %>%
     set_engine("glm") %>% 
     set_mode("classification") %>% 
     fit(Direction ~ Lag2 + sqrt(abs(Lag1)), data = Weekly_train)
-
 augment(logistic.m_model, new_data = Weekly_test) %>% 
     conf_mat(truth = Direction, estimate = .pred_class)
 ```
@@ -725,7 +697,6 @@ logistic.m_model <- logistic_reg() %>%
     set_engine("glm") %>% 
     set_mode("classification") %>% 
     fit(Direction ~ Lag2 + I(Lag1^2), data = Weekly_train)
-
 augment(logistic.m_model, new_data = Weekly_test) %>% 
     conf_mat(truth = Direction, estimate = .pred_class)
 ```
@@ -747,7 +718,6 @@ lda.m_model <- discrim_linear() %>%
     set_engine("MASS") %>% 
     set_mode("classification") %>%
     fit(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5, data = Weekly_train)
-
 # confusion matrix
 augment(lda.m_model, new_data = Weekly_test) %>% 
     conf_mat(truth = Direction, estimate = .pred_class)
@@ -771,7 +741,6 @@ lda.m_model <- discrim_linear() %>%
     set_engine("MASS") %>% 
     set_mode("classification") %>%
     fit(Direction ~ Lag2*Lag3, data = Weekly_train)
-
 # confusion matrix
 augment(lda.m_model, new_data = Weekly_test) %>% 
     conf_mat(truth = Direction, estimate = .pred_class)
@@ -796,7 +765,6 @@ KNN.K_model <- c(1:10) %>%
         set_mode("classification") %>%
         set_engine("kknn") %>% 
         fit(Direction ~ Lag2, data = Weekly_train))
-
 KNN.K_performance <- KNN.K_model %>% 
     map_dfr(~ tibble(
         `pred.down true.down` = (augment(.x, new_data = Weekly_test) %>% 
@@ -810,7 +778,6 @@ KNN.K_performance <- KNN.K_model %>%
         `overall accuracy` = (augment(.x, new_data = Weekly_test) %>% 
         accuracy(truth = Direction, estimate = .pred_class))$.estimate
     ))
-
 tibble(`K` = c(1:10)) %>% 
     bind_cols(KNN.K_performance) %>% 
     knitr::kable()
@@ -824,7 +791,6 @@ KNN.K_model <- nearest_neighbor(neighbors = 3) %>%
     set_mode("classification") %>%
     set_engine("kknn") %>% 
     fit(Direction ~ Lag2, data = Weekly_train)
-
 augment(KNN.K_model, new_data = Weekly_test) %>% 
     conf_mat(truth = Direction, estimate = .pred_class)
 ```
@@ -851,8 +817,7 @@ Auto <- Auto %>%
 Auto %>% 
     mutate(mpg01 = as.numeric(mpg01)) %>% 
     select(- mpg, - name) %>% 
-    corrr::correlate() %>% 
-    knitr::kable()
+    corrr::correlate()
 ```
 
 
@@ -1002,7 +967,6 @@ KNN.K_model <- c(1:30) %>%
         set_mode("classification") %>%
         set_engine("kknn") %>% 
         fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train))
-
 KNN.K_performance <- KNN.K_model %>% 
     map_dfr(~ tibble(
         `pred.down true.down` = (augment(.x, new_data = Auto_test) %>% 
@@ -1016,7 +980,6 @@ KNN.K_performance <- KNN.K_model %>%
         `overall accuracy` = (augment(.x, new_data = Auto_test) %>% 
         accuracy(truth = mpg01, estimate = .pred_class))$.estimate
     ))
-
 tibble(`K` = c(1:30)) %>% 
     bind_cols(KNN.K_performance) %>% 
     mutate(`test errors` = 1 - `overall accuracy`) %>% 
@@ -1035,7 +998,6 @@ KNN_model <- nearest_neighbor(neighbors = 25) %>%
     set_mode("classification") %>%
     set_engine("kknn") %>% 
     fit(mpg01 ~ cylinders + displacement + horsepower + weight, data = Auto_train)
-
 augment(KNN_model, new_data = Auto_test) %>% 
     conf_mat(truth = mpg01, estimate = .pred_class)
 ```
@@ -1046,4 +1008,3 @@ augment(KNN_model, new_data = Auto_test) %>%
     accuracy(truth = mpg01, estimate = .pred_class) %>% 
     knitr::kable()
 ```
-
