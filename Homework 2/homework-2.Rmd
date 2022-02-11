@@ -1,0 +1,417 @@
+---
+title: "Homework 2"
+author: "Zhengting (Johnathan) He"
+date: "2022/2/11"
+output:
+  pdf_document: 
+    latex_engine: lualatex
+  html_document: default
+  word_document: default
+---
+\fontsize{8}{6}
+\fontseries{b}
+\selectfont
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+```
+
+
+```{r, message = FALSE, results = "hide"}
+# set up
+require(ISLR)
+require(tidyverse)
+require(tidymodels)
+require(boot)
+```
+
+
+# Resampling methods ISL: 5.4
+
+
+## Problem 1
+
+
+Since $Var(X) = E[(x - E[X])^2]$,
+
+
+$$
+Var(\alpha X + (1-\alpha) Y)
+$$
+
+$$
+= E[((\alpha X + (1 - \alpha) Y) - (\alpha \mu_X + (1 - \alpha) \mu_Y))^2]
+$$
+$$
+= \alpha^2 E[(X - \mu_X)^2] + (1-\alpha)^2 E[(Y - \mu_Y)^2] +
+2 \alpha (1 - \alpha) E[(X - \mu_X)(Y - \mu_Y)]
+$$
+
+$$
+= \alpha^2 \sigma_X^2 + (1 -2\alpha + \alpha^2) \sigma_Y^2 + 2(-\alpha^2 + \alpha)\sigma_{XY}
+$$
+
+
+For $\alpha$ that minimize $Var(\alpha X + (1-\alpha) Y)$,
+
+
+$$
+\frac{\partial \ \{Var(\alpha X + (1-\alpha) Y\})}{\partial \ \alpha} = 0
+$$
+
+$$
+2\sigma_X^2 \alpha -2\sigma_Y^2 + 2\sigma_Y^2 \alpha -4\sigma_{XY} \alpha + 2\sigma_{XY} = 0
+$$
+
+$$
+(\sigma_X^2 + \sigma_Y^2 - 2\sigma_{XY}) \alpha = \sigma_Y^2 - \sigma_{XY}
+$$
+
+$$
+\alpha = \frac{\sigma_Y^2 - \sigma_{XY}}{\sigma_X^2 + \sigma_Y^2 - 2\sigma_{XY}}
+$$
+
+
+## Problem 3 [^1][^2]
+
+
+[^1]: Gareth J, Daniela W, Trevor H, et al. An introduction to statistical learning: with applications in R[M]. Spinger, 2013.
+
+[^2]: Hastie T, Tibshirani R, Friedman J H, et al. The elements of statistical learning: data mining, inference, and prediction[M]. New York: springer, 2009.
+
+### (a)
+
+
++ Randomly divide the observations into $k$ groups with approximately equal size.
+
++ For the $i$th group, treat it as a validation set. Fit the statistical learning model to the other $k-1$ groups of the data, and calculate the prediction error of the fitted model when predicting the $i$th group of the data.
+
++ Repeat the process above for each $i \in \{1, 2, …, k\}$, and combine the $k$ estimates of the prediction error. Let $Err$ denote the error in the validation sample, the $k$-fold cross-validation estimate is computed by averaging/combining these values:
+
+
+$$
+CV_{(k)} = \frac{1}{k}\sum_{i=1}^k{Err_i}
+$$
+
+
+### (b)
+
+
+#### i.
+
+
++ Advantages:
+
+    - Allow for more stable and reliable test error rate estimates by reduce the variation of the test error rate estimates. In the validation set approach, the test error rate estimates deoend on precisely what observations are assigned to the training set and what observations are assigned to the testing set.
+    
+    - Reduce overestimation of the test error rate by training the model using more observations (entire dataset is used over all $k$ folds).
+
++ Disadvantages:
+
+    - More computationally intensive, since we need to refit the model $k$ times in different training sets.
+    
+    
+#### ii.
+
+
++ Advantages:
+
+    - Less variance by reducing the correlation between the training sets in each fold compared to leave-one-out cross-validation (LOOCV).
+    
+    - Less computationally intensive, since LOOCV invloves refitting the model $n$ times in different training sets.
+    
++ Disadvantages:
+
+    - More biased estimates of the test error, since LOOCV uses more observations ($n-1$) to train the model.
+
+
+## Problem 5
+
+
+### (a)
+
+
+```{r}
+# fit logistic regression model for classification
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(default ~ income + balance, data = Default)
+```
+
+
+### (b)
+
+
+#### i
+
+
+```{r}
+# train and test split
+set.seed(1)
+Default_split <- initial_split(Default, strata = default, prop = 0.5)
+Default_train <- training(Default_split)
+Default_test <- testing(Default_split)
+```
+
+
+```{r}
+# check on sample split
+dim(Default)
+dim(Default_train)
+dim(Default_test)
+```
+
+
+#### ii
+
+
+```{r}
+# fit model in training set
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(default ~ income + balance, data = Default_train)
+```
+
+
+#### iii.
+
+
+```{r}
+# classification in testing set
+predict(logistic_model, new_data = Default_test)
+```
+
+
+#### iv.
+
+
+```{r}
+# confusion matrix
+augment(logistic_model, new_data = Default_test) %>%
+    conf_mat(truth = default, estimate = .pred_class)
+```
+
+
+```{r}
+# test accuracy
+augment(logistic_model, new_data = Default_test) %>%
+    accuracy(truth = default, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The fraction of the observations in the validation set that are misclassified is $1 - 97.3\% = 2.7\%$.
+
+
+### (c)
+
+
+```{r}
+# train and test split
+set.seed(10)
+Default_split <- initial_split(Default, strata = default, prop = 0.5)
+Default_train <- training(Default_split)
+Default_test <- testing(Default_split)
+
+# classification in testing set
+predict(logistic_model, new_data = Default_test)
+
+# confusion matrix
+augment(logistic_model, new_data = Default_test) %>%
+    conf_mat(truth = default, estimate = .pred_class)
+
+# test accuracy
+augment(logistic_model, new_data = Default_test) %>%
+    accuracy(truth = default, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The fraction of the observations in the validation set that are misclassified is $1 - 97.2\% = 2.8\%$.
+
+
+```{r}
+# train and test split
+set.seed(100)
+Default_split <- initial_split(Default, strata = default, prop = 0.5)
+Default_train <- training(Default_split)
+Default_test <- testing(Default_split)
+
+# classification in testing set
+predict(logistic_model, new_data = Default_test)
+
+# confusion matrix
+augment(logistic_model, new_data = Default_test) %>%
+    conf_mat(truth = default, estimate = .pred_class)
+
+# test accuracy
+augment(logistic_model, new_data = Default_test) %>%
+    accuracy(truth = default, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The fraction of the observations in the validation set that are misclassified is $1 - 97.5\% = 2.5\%$.
+
+
+```{r}
+# train and test split
+set.seed(1000)
+Default_split <- initial_split(Default, strata = default, prop = 0.5)
+Default_train <- training(Default_split)
+Default_test <- testing(Default_split)
+
+# classification in testing set
+predict(logistic_model, new_data = Default_test)
+
+# confusion matrix
+augment(logistic_model, new_data = Default_test) %>%
+    conf_mat(truth = default, estimate = .pred_class)
+
+# test accuracy
+augment(logistic_model, new_data = Default_test) %>%
+    accuracy(truth = default, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The fraction of the observations in the validation set that are misclassified is $1 - 97.3\% = 2.7\%$.
+
+
+The results of fraction of misclassified observations in the validation set are similar but with variance, which is due to the exact observations that are assigned to the training set and the exact observations that are assigned to the testing set.
+
+
+### (d)
+
+
+```{r}
+# check `student` predictor
+skimr::skim(Default_train$student)
+```
+
+
+```{r}
+# train and test split
+set.seed(1)
+Default_split <- initial_split(Default, strata = default, prop = 0.5)
+Default_train <- training(Default_split)
+Default_test <- testing(Default_split)
+```
+
+
+```{r}
+# fit model in training set
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(default ~ income + balance + student, data = Default_train)
+```
+
+
+```{r}
+# confusion matrix
+augment(logistic_model, new_data = Default_test) %>%
+    conf_mat(truth = default, estimate = .pred_class)
+```
+
+
+```{r}
+# test accuracy
+augment(logistic_model, new_data = Default_test) %>%
+    accuracy(truth = default, estimate = .pred_class) %>% 
+    knitr::kable()
+```
+
+
+The fraction of the observations in the validation set that are misclassified is $1 - 97.3\% = 2.7\%$, same as the previous model without predictor `student`, indicating including `student` does not help to improve prediction performance.
+
+
+## Problem 6
+
+
+### (a)
+
+
+```{r}
+# fit logistic regression model for classification
+logistic_model <- logistic_reg() %>% 
+    set_engine("glm") %>% 
+    set_mode("classification") %>% 
+    fit(default ~ income + balance, data = Default)
+```
+
+
+```{r}
+# standard error estimates
+logistic_model %>% tidy() %>% knitr::kable()
+```
+
+
+```{r}
+# or using `summary()` function as required
+logistic_model %>% extract_fit_engine() %>% summary()
+```
+
+
+The estimated standard error associated with `income` is 4.985e-06.
+
+The estimated standard error associated with `balance` is 2.274e-04.
+
+
+### (b)
+
+
+```{r}
+# function for coefficient estimates of observation index
+boot.fn <- function(dataset, index) {
+    coefficients(glm(default ~ income + balance, family = binomial, data = dataset, subset = index))[2:3]
+}
+```
+
+
+### (c)
+
+
+```{r}
+# boofstrap estimation of standard error
+set.seed(1)
+boot(Default, boot.fn, 100)
+```
+
+
+### {tidymodels} for (b) (c)
+
+
+```{r}
+# bootstrap samples
+set.seed(100)
+Default_boots <- bootstraps(Default, times = 100)
+
+# function for coefficient estimates of observation index
+boot.fn <- function(split) {
+    glm_fit <- logistic_reg() %>% 
+        set_engine("glm") %>% 
+        set_mode("classification") %>% fit(default ~ income + balance, family = binomial, data = analysis(split))
+    tidy(glm_fit)
+}
+
+# apply function to bootstrap samples
+boot_res <- Default_boots %>%
+    mutate(models = map(splits, boot.fn))
+
+# boofstrap estimation of standard error
+boot_res %>%
+    unnest(cols = c(models)) %>%
+    group_by(term) %>%
+    summarise(mean = mean(estimate),
+              sd = sd(estimate))
+```
+
+
+### (d)
+
+
+The standard errors obtained by bootstrap method are similar but slightly lower the the standard errors obtained by `glm()` function, both for `income` and `balance`.
