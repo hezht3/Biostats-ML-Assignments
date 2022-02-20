@@ -1037,7 +1037,7 @@ mean((College_test[, "Apps"] - c(plsr_pred))^2)
 ```
 
 
-As shown from the plot and output above, the value of M with lowest test error is around 8. The mean square error in the testing set is 973152.8. It worth noted that the test MSE do not decrease much when M is above 8, and selecting M = 8 may result in a slightly higher test error but parsimonious model.
+As shown from the plot and output above, the value of M with lowest test error is 12. The mean square error in the testing set is 973152.8. It worth noted that the test MSE do not decrease much when M is above 8, and selecting M = 8 may result in a slightly higher test error but parsimonious model.
 
 
 ### (g)
