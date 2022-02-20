@@ -4,13 +4,13 @@ author: "Zhengting (Johnathan) He"
 date: "2022/2/11"
 output:
   pdf_document: 
+    toc_depth: 2
     latex_engine: lualatex
   html_document: default
   word_document: default
+header-includes:
+- \usepackage{amsmath,latexsym,amsfonts,amsthm,cleveref}
 ---
-\fontsize{8}{6}
-\fontseries{b}
-\selectfont
 
 
 ```{r setup, include=FALSE}
@@ -24,6 +24,9 @@ require(ISLR)
 require(tidyverse)
 require(tidymodels)
 require(boot)
+require(leaps)
+require(glmnet)
+require(pls)
 ```
 
 
@@ -72,6 +75,14 @@ $$
 \alpha = \frac{\sigma_Y^2 - \sigma_{XY}}{\sigma_X^2 + \sigma_Y^2 - 2\sigma_{XY}}
 $$
 
+Since the second derivative is positive:
+
+$$
+\frac{\partial^2 \ \{Var(\alpha X + (1-\alpha) Y\})}{\partial \ \alpha^2} = 2\sigma_X^2 + 2\sigma_Y^2 - 4\sigma_{XY} = 2*Var(X-Y) \geq 0
+$$
+
+the $\alpha$ presented above does minimize $Var(\alpha X + (1-\alpha) Y)$.
+
 
 ## Problem 3 [^1][^2]
 
@@ -103,7 +114,7 @@ $$
 
 + Advantages:
 
-    - Allow for more stable and reliable test error rate estimates by reduce the variation of the test error rate estimates. In the validation set approach, the test error rate estimates deoend on precisely what observations are assigned to the training set and what observations are assigned to the testing set.
+    - Allow for more stable and reliable test error rate estimates by reducing the variation of the test error rate estimates. In the validation set approach, the test error rate estimates deoend on precisely what observations are assigned to the training set and what observations are assigned to the testing set.
     
     - Reduce overestimation of the test error rate by training the model using more observations (entire dataset is used over all $k$ folds).
 
@@ -367,7 +378,8 @@ The estimated standard error associated with `balance` is 2.274e-04.
 ```{r}
 # function for coefficient estimates of observation index
 boot.fn <- function(dataset, index) {
-    coefficients(glm(default ~ income + balance, family = binomial, data = dataset, subset = index))[2:3]
+    coefficients(glm(default ~ income + balance,
+                     family = binomial, data = dataset, subset = index))[2:3]
 }
 ```
 
@@ -394,7 +406,8 @@ Default_boots <- bootstraps(Default, times = 100)
 boot.fn <- function(split) {
     glm_fit <- logistic_reg() %>% 
         set_engine("glm") %>% 
-        set_mode("classification") %>% fit(default ~ income + balance, family = binomial, data = analysis(split))
+        set_mode("classification") %>%
+        fit(default ~ income + balance, family = binomial, data = analysis(split))
     tidy(glm_fit)
 }
 
@@ -407,11 +420,636 @@ boot_res %>%
     unnest(cols = c(models)) %>%
     group_by(term) %>%
     summarise(mean = mean(estimate),
-              sd = sd(estimate))
+              sd = sd(estimate)) %>% 
+    knitr::kable()
 ```
 
 
 ### (d)
 
 
-The standard errors obtained by bootstrap method are similar but slightly lower the the standard errors obtained by `glm()` function, both for `income` and `balance`.
+The standard errors obtained by bootstrap method are slightly lower the the standard errors obtained by `glm()` function, both for `income` and `balance`.
+
+
+# Linear Model Selection and Regularization ISL: 6.8
+
+
+## Problem 1
+
+
+### (a)
+
+
+Best subset selection model has the smallest *training* RSS: the algorithm of best subset selection will consider all possible combinations of predictors and select models with smallest RSS. This will increase the chance of finding the "best" model with smallest training RSS, compared to forward stepwise selection or backward stepwise selection, especially when $k$ is large.
+
+
+### (b)
+
+
+None of the three models can absolutely result in the smallest *test* RSS: best subset selection considers all possible combinations of predictors, and will usually outperform than the other two methods on smallest RSS in the training set, and generally may outperform in the testing set; however, it may be prone to the problem of overfit. Forward stepwise selection and backward stepwise selection consider less possible combinations of predictors, but may outperform best subset selection due to parsimony of the number of predictors. The *test* RSS also depends on the testing set used.
+
+
+### (c)
+
+
+#### i.
+
+
+True: the algorithm of forward stepwise selection obtain the $(k+1)$-variable model by adding one predictor to the $k$ predictors in the $k$-variable model, thus the predictors in the $k$-variable model identified by forward stepwise are a subset of the predictors in the $(k+1)$-variable model identified by forward stepwise selection.
+
+
+#### ii.
+
+
+True: the algorithm of backward stepwise selection obtain the $k$-variable by removing one predictor from the $(k+1)$ predictors in the $(k+1)$-variable model, thus the predictors in the $k$-variable model identified by backward stepwise are a subset of predictors in the $(k+1)$-variable model identified by backward stepwise selection.
+
+
+#### iii.
+
+
+False: the two methods used different algorithm, and thus have no direct linkage on predictors selection. The two methods can select different predictors depending on the training set.
+
+
+#### iv.
+
+
+False: the two methods used different algorithm, and thus have no direct linkage on predictors selection. The two methods can select different predictors depending on the training set.
+
+
+#### v.
+
+
+False: the $(k+1)$-variable model identified by best subset selection is obtained by comparing all possible combinations of $(K+1)$ predictors. The $k$-variable model identified by best subset selection is obtained by comparing all possible combinations of $k$ predictors. There are no direct linkage on predictors selection in these two models, and the two models can select different predictors depending on the training set.
+
+
+## Problem 8
+
+
+### (a)
+
+
+```{r}
+# predictor
+set.seed(1)
+x <- rnorm(100)
+
+# noise
+set.seed(2)
+e <- rnorm(100)
+```
+
+
+### (b)
+
+
+```{r}
+# select b0, b1, b2, b3
+set.seed(3)
+list(c(1:10), c(1:10), c(1:10), c(1:10)) %>% 
+    map2_dfr(c("b0", "b1", "b2", "b3"),
+             ~ tibble(parameter = .y,
+                      value = sample(.x, 1))) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# response
+y <- 5 + 10*x + 7*x^2 + 4*x^3 + e
+```
+
+
+### (c)
+
+
+```{r}
+# best subset selection
+df <- tibble(y = y, x = x)
+model.subset <- regsubsets(y = y, x = poly(x, 10, raw = TRUE), nvmax = 10, method = "exhaustive")
+sum.subset <- model.subset %>% summary()
+sum.subset
+```
+
+
+```{r}
+# cp, bic, adjusted r2
+tibble(subset = c(1:10),
+       cp = sum.subset$cp) %>% 
+    mutate(`cp.min` = ifelse(cp == min(cp), "*", "")) %>% 
+    bind_cols(tibble(bic = sum.subset$bic)) %>% 
+    mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
+    bind_cols(tibble(adjr2 = sum.subset$adjr2)) %>% 
+    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# plot cp, bic, adjusted r2
+par(mfrow = c(2, 2))
+
+plot(sum.subset$cp, xlab = "Subset size", ylab = "Cp", type = "l")
+points(which.min(sum.subset$cp), sum.subset$cp[which.min(sum.subset$cp)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.subset$bic, xlab = "Subset size", ylab = "BIC", type = "l")
+points(which.min(sum.subset$bic), sum.subset$bic[which.min(sum.subset$bic)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.subset$adjr2, xlab = "Subset size", ylab = "Adjusted R-square", type = "l")
+points(which.max(sum.subset$adjr2), sum.subset$adjr2[which.max(sum.subset$adjr2)],
+       col = "red", cex = 2, pch = 20)
+```
+
+
+According to BIC, the best subset is size 3, the corresponding coefficients are:
+
+
+```{r}
+coef(model.subset, id = 3) %>% 
+    knitr::kable()
+```
+
+
+According to Cp and adjusted $R^2$, the best subset is size 9, the corresponding coefficients are:
+
+
+```{r}
+coef(model.subset, id = 9) %>% 
+    knitr::kable()
+```
+
+
+### (d)
+
+
+#### Forward Stepwise Selection
+
+
+```{r}
+# forward stepwise selection
+df <- tibble(y = y, x = x)
+model.forward <- regsubsets(y = y, x = poly(x, 10, raw = TRUE), nvmax = 10, method = "forward")
+sum.forward <- model.forward %>% summary()
+sum.forward
+```
+
+
+```{r}
+# cp, bic, adjusted r2
+tibble(variable = c(1:10),
+       cp = sum.forward$cp) %>% 
+    mutate(`cp.min` = ifelse(cp == min(cp), "*", "")) %>% 
+    bind_cols(tibble(bic = sum.forward$bic)) %>% 
+    mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
+    bind_cols(tibble(adjr2 = sum.forward$adjr2)) %>% 
+    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# plot cp, bic, adjusted r2
+par(mfrow = c(2, 2))
+
+plot(sum.forward$cp, xlab = "No. of variables", ylab = "Cp", type = "l")
+points(which.min(sum.forward$cp), sum.forward$cp[which.min(sum.forward$cp)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.forward$bic, xlab = "No. of variables", ylab = "BIC", type = "l")
+points(which.min(sum.forward$bic), sum.forward$bic[which.min(sum.forward$bic)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.forward$adjr2, xlab = "No. of variables", ylab = "Adjusted R-square", type = "l")
+points(which.max(sum.forward$adjr2), sum.forward$adjr2[which.max(sum.forward$adjr2)],
+       col = "red", cex = 2, pch = 20)
+```
+
+
+According to BIC, the best subset is size 3, the corresponding coefficients are:
+
+
+```{r}
+coef(model.forward, id = 3) %>% 
+    knitr::kable()
+```
+
+
+According to Cp and adjusted $R^2$, the best subset is size 10, the corresponding coefficients are:
+
+
+```{r}
+coef(model.forward, id = 10) %>% 
+    knitr::kable()
+```
+
+
+#### Backward Stepwise Selection
+
+
+```{r}
+# backward stepwise selection
+df <- tibble(y = y, x = x)
+model.backward <- regsubsets(y = y, x = poly(x, 10, raw = TRUE), nvmax = 10, method = "backward")
+sum.backward <- model.backward %>% summary()
+sum.backward
+```
+
+
+```{r}
+# cp, bic, adjusted r2
+tibble(variable = c(1:10),
+       cp = sum.backward$cp) %>% 
+    mutate(`cp.min` = ifelse(cp == min(cp), "*", "")) %>% 
+    bind_cols(tibble(bic = sum.backward$bic)) %>% 
+    mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
+    bind_cols(tibble(adjr2 = sum.backward$adjr2)) %>% 
+    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# plot cp, bic, adjusted r2
+par(mfrow = c(2, 2))
+
+plot(sum.backward$cp, xlab = "No. of variables", ylab = "Cp", type = "l")
+points(which.min(sum.backward$cp), sum.backward$cp[which.min(sum.backward$cp)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.backward$bic, xlab = "No. of variables", ylab = "BIC", type = "l")
+points(which.min(sum.backward$bic), sum.backward$bic[which.min(sum.backward$bic)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.backward$adjr2, xlab = "No. of variables", ylab = "Adjusted R-square", type = "l")
+points(which.max(sum.backward$adjr2), sum.backward$adjr2[which.max(sum.backward$adjr2)],
+       col = "red", cex = 2, pch = 20)
+```
+
+
+According to BIC, the best subset is size 8, the corresponding coefficients are:
+
+
+```{r}
+coef(model.backward, id = 8) %>% 
+    knitr::kable()
+```
+
+
+According to Cp and adjusted $R^2$, the best subset is size 9, the corresponding coefficients are:
+
+
+```{r}
+coef(model.backward, id = 9) %>% 
+    knitr::kable()
+```
+
+
+#### Comparing to results in (c)
+
+
+|Statistics|Best subset selection|Forward stepwise selection|Backward stepwise selection|
+|:--:|:--:|:--:|:--:|
+|Cp|X1, X2, X4, X5, X6, X7, X8, X9, X10|X1, X2, X3, X4, X5, X6, X7, X8, X9, X10|X1, X2, X4, X5, X6, X7, X8, X9, X10|
+|BIC|X1, X2, X3|X1, X2, X3|X1, X2, X5, X6, X7, X8, X9, X10|
+|Adjusted $R^2$|X1, X2, X4, X5, X6, X7, X8, X9, X10|X1, X2, X3, X4, X5, X6, X7, X8, X9, X10|X1, X2, X4, X5, X6, X7, X8, X9, X10|
+
+
+In this simulated dataset, best subset selection, forward stepwise selection, and backward stepwise selection result in different model selected. The models selected according to Cp and adjusted $R^2$ do not have much differences for these 3 methods, while the model selected according to BIC is quite different for backward stepwise selection compared to best subset selection and forward stepwise selection.
+
+
+### (e)
+
+
+```{r}
+# train and test split
+set.seed(100)
+x = model.matrix(y ~ poly(x, 10, raw = T), data = df)[, -1]
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+y.test <- y[test]
+```
+
+
+```{r}
+# cross-validation
+cv.out <- cv.glmnet(x[train,], y[train], alpha = 1)
+plot(cv.out)
+```
+
+
+```{r}
+# lambda resulting in smallest cv error
+bestlam <- cv.out$lambda.min
+bestlam
+```
+
+
+```{r}
+# refit using whole data
+out <- glmnet(x, y, alpha = 1)
+lasso.coef <- predict(out, type = "coefficients", s = 0.20)[1:11,]
+lasso.coef %>% knitr::kable()
+```
+
+
+As shown from the output the $\lambda$ resulting in lowest cross-validation error is 0.128. Using this $\lambda$ to fit lasso model using all observations, the model picks $X$, $X^2$, and $X^3$ as predictors, while shrinking the coefficients of other predictors as 0. The coefficient estimates are similar to the best subset selection and forward stepwise selection models picked by BIC.
+
+
+### (f)
+
+
+```{r}
+# predictor
+set.seed(1)
+x <- rnorm(100)
+# noise
+set.seed(2)
+e <- rnorm(100)
+```
+
+
+```{r}
+# select b7
+set.seed(4)
+tibble(parameter = "b7",
+       value = sample(c(1:10), 1)) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# response
+y <- 5 + 8*x^7 + e
+```
+
+
+#### Best Subset Selection
+
+
+```{r}
+# best subset selection
+df <- tibble(y = y, x = x)
+model.subset <- regsubsets(y = y, x = poly(x, 10, raw = TRUE), nvmax = 10, method = "exhaustive")
+sum.subset <- model.subset %>% summary()
+sum.subset
+```
+
+
+```{r}
+# cp, bic, adjusted r2
+tibble(subset = c(1:10),
+       cp = sum.subset$cp) %>% 
+    mutate(`cp.min` = ifelse(cp == min(cp), "*", "")) %>% 
+    bind_cols(tibble(bic = sum.subset$bic)) %>% 
+    mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
+    bind_cols(tibble(adjr2 = sum.subset$adjr2)) %>% 
+    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    knitr::kable()
+```
+
+
+```{r}
+# plot cp, bic, adjusted r2
+par(mfrow = c(2, 2))
+
+plot(sum.subset$cp, xlab = "Subset size", ylab = "Cp", type = "l")
+points(which.min(sum.subset$cp), sum.subset$cp[which.min(sum.subset$cp)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.subset$bic, xlab = "Subset size", ylab = "BIC", type = "l")
+points(which.min(sum.subset$bic), sum.subset$bic[which.min(sum.subset$bic)],
+       col = "red", cex = 2, pch = 20)
+
+plot(sum.subset$adjr2, xlab = "Subset size", ylab = "Adjusted R-square", type = "l")
+points(which.max(sum.subset$adjr2), sum.subset$adjr2[which.max(sum.subset$adjr2)],
+       col = "red", cex = 2, pch = 20)
+```
+
+
+As shown from the output above, according to Cp and adjusted $R^2$, the best subset is size 9, the corresponding coefficients are:
+
+
+```{r}
+coef(model.subset, id = 9) %>%
+    knitr::kable()
+```
+
+
+According to BIC, the best subset is size 1, the corresponding coefficients are:
+
+
+```{r}
+coef(model.subset, id = 1) %>%
+    knitr::kable()
+```
+
+
+#### Lasso regression
+
+
+```{r}
+# train and test split
+set.seed(100)
+x = model.matrix(y ~ poly(x, 10, raw = T), data = df)[, -1]
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+y.test <- y[test]
+```
+
+
+```{r, fig.width = 6, fig.height = 4, fig.align = 'center'}
+# cross-validation
+cv.out <- cv.glmnet(x[train,], y[train], alpha = 1)
+plot(cv.out)
+```
+
+
+```{r}
+# lambda resulting in smallest cv error
+bestlam <- cv.out$lambda.min
+bestlam
+```
+
+
+```{r}
+# refit using whole data
+out <- glmnet(x, y, alpha = 1)
+lasso.coef <- predict(out, type = "coefficients", s = 0.20)[1:11,]
+lasso.coef %>% knitr::kable()
+```
+
+
+As shown from the output the $\lambda$ resulting in lowest cross-validation error is 19.43. Using this $\lambda$ to fit lasso model using all observations, the model picks $X^7$ as predictor, while shrinking the coefficients of other predictors as 0. The predictors and coefficient estimates are similar to the best subset selection model picked by BIC, while the best subset selection models picked by Cp or adjusted $R^2$ picked all covariates, except for $X^2$, as predictors.
+
+
+## (9)
+
+
+### (a)
+
+
+```{r}
+# train and test split using 8:2 ratio
+set.seed(100)
+College_split <- initial_split(College, prop = 0.8)
+College_train <- training(College_split)
+College_test <- testing(College_split)
+```
+
+
+### (b)
+
+
+```{r}
+# fit linear model
+linear_model <- linear_reg() %>%
+    set_engine("lm") %>%
+    set_mode("regression") %>%
+    fit(Apps ~ ., data = College_train)
+```
+
+
+```{r}
+# test error
+test.error <- augment(linear_model, new_data = College_test) %>%
+    rmse(truth = Apps, estimate = .pred)
+test.error %>% 
+    bind_rows(tibble(`.metric` = "mse",
+                     `.estimator` = "standard",
+                     `.estimate` = (test.error$.estimate)^2)) %>% 
+    knitr::kable()
+```
+
+
+The mean square error in the testing set is 966160.88.
+
+
+### (c)
+
+
+```{r}
+# cross-validation
+train_mat <- model.matrix(Apps ~ ., data = College_train)
+test_mat <- model.matrix(Apps ~ ., data = College_test)
+
+set.seed(100)
+grid <- 10^seq(4, -4, length = 200)
+cv_ridge <- cv.glmnet(train_mat, College_train$Apps, alpha = 0, lambda = grid)
+plot(cv_ridge)
+```
+
+
+```{r}
+# lambda
+lambda.best <- cv_ridge$lambda.min
+lambda.best
+```
+
+
+```{r}
+ridge_pred <- predict(glmnet(train_mat, College_train$Apps, alpha = 0, lambda = grid),
+                      newx = test_mat, s = lambda.best)
+mean((College_test[, "Apps"] - ridge_pred)^2)
+```
+
+
+The mean square error in the testing set is 966160.8.
+
+
+### (d)
+
+
+```{r}
+# cross-validation
+set.seed(100)
+grid <- 10^seq(4, -4, length = 200)
+cv_lasso <- cv.glmnet(train_mat, College_train$Apps, alpha = 1, lambda = grid)
+plot(cv_lasso)
+```
+
+
+```{r}
+# lambda
+lambda.best <- cv_ridge$lambda.min
+lambda.best
+```
+
+
+```{r}
+lasso_pred <- predict(glmnet(train_mat, College_train$Apps, alpha = 1, lambda = grid),
+                      newx = test_mat, s = lambda.best)
+mean((College_test[, "Apps"] - lasso_pred)^2)
+```
+
+
+```{r}
+predict(glmnet(train_mat, College_train$Apps, alpha = 1),
+        s = lambda.best, type = "coefficients")
+```
+
+
+The mean square error in the testing set is 966162.9. The number of non-zero coefficient estimates is 15.
+
+
+### (e)
+
+
+```{r}
+set.seed(100)
+pcr_model <- pcr(Apps ~ ., data = College_train, scale = TRUE, validation = "CV")
+validationplot(pcr_model, val.type = "MSEP")
+```
+
+
+```{r}
+summary(pcr_model)
+```
+
+
+```{r}
+pcr_pred = predict(pcr_model, College_test, ncomp = 17)
+mean((College_test[, "Apps"] - c(pcr_pred))^2)
+```
+
+
+As shown from the plot and output above, the value of M with lowest test error is 17, as the test MSE continuously decrease as M increase. The mean square error in the testing set is 966160.9. It worth noted that the test MSE do not decrease much when M is above 5, and selecting M = 5 may result in a slightly higher test error but parsimonious model.
+
+
+### (f)
+
+
+```{r}
+set.seed(100)
+plsr_model <- plsr(Apps ~ ., data = College_train, scale = TRUE, validation = "CV")
+validationplot(plsr_model, val.type = "MSEP")
+```
+
+
+```{r}
+summary(plsr_model)
+```
+
+
+```{r}
+plsr_pred = predict(plsr_model, College_test, ncomp = 12)
+mean((College_test[, "Apps"] - c(plsr_pred))^2)
+```
+
+
+As shown from the plot and output above, the value of M with lowest test error is around 8. The mean square error in the testing set is 973152.8. It worth noted that the test MSE do not decrease much when M is above 8, and selecting M = 8 may result in a slightly higher test error but parsimonious model.
+
+
+### (g)
+
+
+|Model|Test MSE|
+|:--:|:--:|
+|Linear model|966160.88|
+|Ridge regression model|966160.8|
+|Lasso model|966162.9|
+|PCR model|966160.9|
+|PLS model|973152.8|
+
+
+As shown in the table above, all models resulting in a test MSE around 966160. Linear model, ridge regression model, principle component regression model slightly outperform lasso model, while partial least square results in highest test MSE in these 5 models. It may because for this dataset and the training and testing split, in a low dimensional setting, dimension reduction or regularization do not add a lot to the prediction performance compared with traditional least square linear regression.
