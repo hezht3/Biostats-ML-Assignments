@@ -539,7 +539,7 @@ tibble(subset = c(1:10),
     bind_cols(tibble(bic = sum.subset$bic)) %>% 
     mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
     bind_cols(tibble(adjr2 = sum.subset$adjr2)) %>% 
-    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    mutate(`adjr2.max` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
     knitr::kable()
 ```
 
@@ -603,7 +603,7 @@ tibble(variable = c(1:10),
     bind_cols(tibble(bic = sum.forward$bic)) %>% 
     mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
     bind_cols(tibble(adjr2 = sum.forward$adjr2)) %>% 
-    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    mutate(`adjr2.max` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
     knitr::kable()
 ```
 
@@ -664,7 +664,7 @@ tibble(variable = c(1:10),
     bind_cols(tibble(bic = sum.backward$bic)) %>% 
     mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
     bind_cols(tibble(adjr2 = sum.backward$adjr2)) %>% 
-    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    mutate(`adjr2.max` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
     knitr::kable()
 ```
 
@@ -804,7 +804,7 @@ tibble(subset = c(1:10),
     bind_cols(tibble(bic = sum.subset$bic)) %>% 
     mutate(`bic.min` = ifelse(bic == min(bic), "*", "")) %>% 
     bind_cols(tibble(adjr2 = sum.subset$adjr2)) %>% 
-    mutate(`adjr2.min` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
+    mutate(`adjr2.max` = ifelse(adjr2 == max(adjr2), "*", "")) %>% 
     knitr::kable()
 ```
 

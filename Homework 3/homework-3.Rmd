@@ -1,0 +1,257 @@
+---
+title: "Homework 3"
+author: "Zhengting (Johnathan) He"
+date: "2022/2/27"
+output:
+  pdf_document: 
+    toc_depth: 2
+    latex_engine: lualatex
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{amsmath,latexsym,amsfonts,amsthm,cleveref}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+```
+
+
+```{r, message = FALSE, results = "hide"}
+# set up
+require(tidyverse)
+require(tidymodels)
+require(factoextra)
+require(ISLR)
+```
+
+
+# Unsupervised Learning ISL: 10.7
+
+
+## Problem 8
+
+
+### (a)
+
+
+```{r}
+# principle component model
+USArrests_pca <- USArrests %>%
+    prcomp(scale = TRUE)
+```
+
+
+```{r}
+# percent of variance
+tidy(USArrests_pca, matrix = "eigenvalues") %>% 
+    knitr::kable()
+```
+
+
+Or, using the `sdev` output of the `prcomp()` function:
+
+
+```{r}
+USArrests_var <- USArrests_pca$sdev^2
+USArrests_var / sum(USArrests_var)
+```
+
+
+### (b)
+
+
+```{r}
+# PC loading
+phi <- USArrests_pca$rotation
+```
+
+
+```{r}
+# scale dataset
+USArrests_scal = scale(USArrests)
+```
+
+
+```{r}
+# numerator
+numer <- apply((USArrests_scal %*% phi)^2, 2, sum)
+```
+
+
+```{r}
+# denominator
+denom <- sum(apply(USArrests_scal^2, 2, sum))
+```
+
+
+```{r}
+# percent of variance
+numer/denom
+```
+
+
+The two approaches above gave the same results.
+
+
+## Problem 9
+
+
+### (a)
+
+
+```{r}
+# hierarchical clustering with complete linkage
+USArrests_hcl <- USArrests %>% 
+    dist() %>% 
+    hclust(method = "complete")
+```
+
+
+```{r, fig.width = 6, fig.height = 8}
+fviz_dend(USArrests_hcl, main = "complete", k = 3, color_labels_by_k = TRUE)
+```
+
+
+### (b)
+
+
+```{r}
+USArrests_tree <- cutree(USArrests_hcl, 3) %>% 
+    as_tibble(rownames = "state")
+
+for(k in 1:3) {
+    cat("\n------------------ Cluster ", k, "------------------\n")
+    cat("\n")
+    print(USArrests_tree %>% filter(value == k) %>% pull(state))
+}
+```
+
+
+### (c)
+
+
+```{r}
+# scale
+USArrests_scal <- scale(USArrests, center = FALSE)
+```
+
+
+```{r}
+# hierarchical clustering with complete linkage
+USArrests_hcl_scal <- USArrests_scal %>% 
+    dist() %>% 
+    hclust(method = "complete")
+```
+
+
+```{r, fig.width = 6, fig.height = 9}
+fviz_dend(USArrests_hcl_scal, main = "complete", k = 3, color_labels_by_k = TRUE)
+```
+
+
+```{r}
+USArrests_scal_tree <- cutree(USArrests_hcl_scal, 3) %>% 
+    as_tibble(rownames = "state")
+
+for(k in 1:3) {
+    cat("\n------------------ Cluster ", k, "------------------\n")
+    cat("\n")
+    print(USArrests_scal_tree %>% filter(value == k) %>% pull(state))
+}
+```
+
+
+### (d)
+
+
+```{r}
+table(cutree(USArrests_hcl, 3), cutree(USArrests_hcl_scal, 3))
+```
+
+
+As shown in the cross-tabulation above, though most states are classified in the same cluster, there are some inconsistencies, indicating scaling the variables has impact on the hierachical clustering obtained. Variables should be scaled before the inter-observation dissimilarities computing, since variables in different scales may have different units and have different weights on the dissimilarities estimates.
+
+
+## Problem 11
+
+
+### (a)
+
+
+```{r}
+data <- read.csv("./DATA/Ch10Ex11.csv", header = FALSE)
+```
+
+
+### (b)
+
+
+```{r}
+# hierarchical clustering with complete linkage, correlation-based distance
+data_hcl_com <- hclust(as.dist(1 - cor(data)), method = "complete")
+```
+
+
+```{r}
+fviz_dend(data_hcl_com, main = "complete")
+```
+
+
+```{r}
+# hierarchical clustering with single linkage, correlation-based distance
+data_hcl_sin <- hclust(as.dist(1 - cor(data)), method = "single")
+```
+
+
+```{r}
+fviz_dend(data_hcl_sin, main = "single")
+```
+
+
+```{r}
+# hierarchical clustering with average linkage, correlation-based distance
+data_hcl_avg <- hclust(as.dist(1 - cor(data)), method = "average")
+```
+
+
+```{r}
+fviz_dend(data_hcl_avg, main = "average")
+```
+
+
+As shown in the output above, the genes mainly separate the samples into two groups when using complete and single linkage, and separate the samples into three groups when using average linkage, while the results may also depend on the height cutpoint. The results depend on the type of linkage used.
+
+
+### (c)
+
+
+Since $p > n$, which indicates the dataset is a high-dimensional dataset, to find the genes differ the most across the two groups, we may consider to conduct a principle component analysis. We should not scale the variables before the principle component analysis, since expression should be measured in the same "units" for each gene.
+
+
+```{r}
+# transpose data
+data <- t(data)
+```
+
+
+```{r}
+# principle component analysis
+data_pca <- data %>% prcomp()
+```
+
+
+```{r}
+# top 20 genes with largest absolute loading
+tidy(data_pca, matrix = "loadings") %>% 
+    group_by(column) %>% 
+    summarise(sum = sum(value)) %>% 
+    mutate(sum = abs(sum)) %>% 
+    arrange(desc(sum)) %>% 
+    head(20) %>% 
+    knitr::kable()
+```
+
+
+As shown in the results above, the top 20 genes that differ the most across the two groups are 865, 68, 911, 428, 624, 11, 803, 524, 980, 822, 765, 801, 771, 529, 654, 570, 237, 451, 959, 906.

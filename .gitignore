@@ -41,3 +41,6 @@ vignettes/*.pdf
 # RMarkdown output
 *.pdf
 *.html
+
+# Dataset
+/Homework 3/DATA/
