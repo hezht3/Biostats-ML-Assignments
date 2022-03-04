@@ -1,6 +1,7 @@
 require(tidyverse)
-require(tidymodels)
 require(data.table)
+require(tidymodels)
+require(probably)
 
 setwd("D:/OneDrive - Johns Hopkins/Course/140.644.01 - Statistical Machine Learning Methods, Theory, and Applications/Assignments/biostats644-Assignments/Final project")
 
@@ -153,6 +154,53 @@ logistic_fit <- logistic_reg() %>%
 augment(logistic_fit, new_data = data_test) %>% 
     conf_mat(truth = mortstat, estimate = .pred_class)
 
+augment(logistic_fit, new_data = data_test) %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(augment(logistic_fit, new_data = data_test) %>% 
+                  sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(augment(logistic_fit, new_data = data_test) %>% 
+                  spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(augment(logistic_fit, new_data = data_test) %>% 
+                  roc_auc(truth = mortstat, `.pred_Assumed alive`))
+
+### different threshold
+
+predictions <- logistic_fit %>%
+    predict(new_data = data_test, type = "prob")
+
+data_test_pred <- bind_cols(predictions, data_test)
+
+threshold_data <- data_test_pred %>%
+    threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025))
+
+threshold_data <- threshold_data %>%
+    filter(.metric != "distance") %>%
+    mutate(group = case_when(
+        .metric == "sens" | .metric == "spec" ~ "1",
+        TRUE ~ "2"
+    ))
+
+max_j_index_threshold <- threshold_data %>%
+    filter(.metric == "j_index") %>%
+    filter(.estimate == max(.estimate)) %>%
+    pull(.threshold)
+
+threshold_data %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
+
+ggplot(threshold_data, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
+    geom_line() +
+    theme_minimal() +
+    scale_color_viridis_d(end = 0.9) +
+    scale_alpha_manual(values = c(.4, 1), guide = "none") +
+    geom_vline(xintercept = max_j_index_threshold, alpha = .6, color = "grey30") +
+    labs(
+        x = "'Good' Threshold\n(above this value is considered 'good')",
+        y = "Metric Estimate",
+        title = "Balancing performance by varying the threshold",
+        subtitle = "Vertical line = Max J-Index"
+    )
 
 # Lasso
 
@@ -181,14 +229,25 @@ tune_res <- logistic_workflow %>%
 
 autoplot(tune_res)
 
-best_penalty <- select_best(tune_res, metric = "roc_auc")
+best_penalty <- select_best(tune_res, metric = "accuracy")
 
 logistic_final <- finalize_workflow(logistic_workflow, best_penalty)
 
 logistic_final_fit <- fit(logistic_final, data = data_train)
 
+augment(logistic_final_fit, new_data = data_test) %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
 
-# https://probably.tidymodels.org/articles/where-to-use.html
+augment(logistic_final_fit, new_data = data_test) %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(augment(logistic_final_fit, new_data = data_test) %>% 
+                  sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(augment(logistic_final_fit, new_data = data_test) %>% 
+                  spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(augment(logistic_final_fit, new_data = data_test) %>% 
+                  roc_auc(truth = mortstat, `.pred_Assumed alive`))
+
+### different threshold https://probably.tidymodels.org/articles/where-to-use.html
 predictions <- logistic_final_fit %>%
     predict(new_data = data_test, type = "prob")
 
@@ -209,6 +268,10 @@ max_j_index_threshold <- threshold_data %>%
     filter(.estimate == max(.estimate)) %>%
     pull(.threshold)
 
+threshold_data %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
+
 ggplot(threshold_data, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
     geom_line() +
     theme_minimal() +
@@ -219,5 +282,5 @@ ggplot(threshold_data, aes(x = .threshold, y = .estimate, color = .metric, alpha
         x = "'Good' Threshold\n(above this value is considered 'good')",
         y = "Metric Estimate",
         title = "Balancing performance by varying the threshold",
-        subtitle = "Sensitivity or specificity alone might not be enough!\nVertical line = Max J-Index"
+        subtitle = "Vertical line = Max J-Index"
     )

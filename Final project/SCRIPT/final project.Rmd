@@ -171,7 +171,7 @@ data %>%
     select(mortstat, RIDAGEYR, BMXWAIST, BPXML1, BPXSY1, BPXDI1, BMXBMI, LBXRDW) %>% 
     mutate(mortstat = factor(mortstat, labels = c("Alive", "Deceased"))) %>% 
     GGally::ggpairs(aes(color = mortstat, alpha = 0.5)) +
-    theme_bw()
+    theme_minimal()
 ```
 
 
@@ -186,7 +186,7 @@ data %>%
     geom_bar(position = "fill") +
     facet_wrap(vars(name), scales = "free", ncol = 2) +
     labs(x = NULL, y = NULL, fill = NULL) +
-    theme_bw()
+    theme_minimal()
 ```
 
 
