@@ -18,8 +18,9 @@ opts_knit$set(root.dir = "D:/OneDrive - Johns Hopkins/Course/140.644.01 - Statis
 setwd("D:/OneDrive - Johns Hopkins/Course/140.644.01 - Statistical Machine Learning Methods, Theory, and Applications/Assignments/biostats644-Assignments/Final project")
 
 require(tidyverse)
-require(tidymodels)
 require(data.table)
+require(tidymodels)
+require(probably)
 ```
 
 
@@ -44,15 +45,7 @@ data <- nhanes2003_2004 %>%
 ```
 
 
-I then checked the class and distribution of all variables:
-
-
-```{r}
-skimr::skim(data)
-```
-
-
-As shown from the output above, all predictors are read in as categorical variables, which are not appropriate for predictors in continuous scale, including `RIDAGEYR`, `BMXWAIST`, `BPXML1`, `BPXSY1`, `BPXDI1`, `BMXBMI`, and `LBXRDW`, according to the codebook. The following data cleaning code aims to assign correct class for each variable, and change non-informative values (e.g., answer as "refused" or "don't know") to `NA`. I also add variable label for each variable, and add value labels for categorical variables:
+I then checked the class and distribution of all variables. All predictors are read in as categorical variables, which are not appropriate for predictors in continuous scale, including `RIDAGEYR`, `BMXWAIST`, `BPXML1`, `BPXSY1`, `BPXDI1`, `BMXBMI`, and `LBXRDW`, according to the codebook. The following data cleaning code aims to assign correct class for each variable, and change non-informative values (e.g., answer as "refused" or "don't know") to `NA`. I also add variable label for each variable, and add value labels for categorical variables:
 
 
 ```{r}
@@ -151,7 +144,7 @@ data <- data %>%
 ```
 
 
-I then drop observations with missing value in the outcome variable or in any predictors. The following results show the final data set used in model building:
+I then drop observations with missing value in the outcome variable or in any predictors. The following results show the summary statistics of final data set used in model building:
 
 
 ```{r}
@@ -228,27 +221,12 @@ augment(logistic_fit, new_data = data_test) %>%
 ```{r}
 augment(logistic_fit, new_data = data_test) %>% 
     accuracy(truth = mortstat, estimate = .pred_class) %>% 
-    kable()
-```
-
-
-```{r}
-augment(logistic_fit, new_data = data_test) %>% 
-    sens(truth = mortstat, estimate = .pred_class) %>% 
-    kable()
-```
-
-
-```{r}
-augment(logistic_fit, new_data = data_test) %>% 
-    spec(truth = mortstat, estimate = .pred_class) %>% 
-    kable()
-```
-
-
-```{r}
-augment(logistic_fit, new_data = data_test) %>% 
-    roc_auc(truth = mortstat, `.pred_Assumed alive`) %>% 
+    bind_rows(augment(logistic_fit, new_data = data_test) %>% 
+                  sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(augment(logistic_fit, new_data = data_test) %>% 
+                  spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(augment(logistic_fit, new_data = data_test) %>% 
+                  roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
     kable()
 ```
 

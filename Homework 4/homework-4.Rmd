@@ -1,0 +1,241 @@
+---
+title: "Homework 4"
+author: "Zhengting (Johnathan) He"
+date: "2022/3/5"
+output:
+  pdf_document: 
+    toc_depth: 2
+    latex_engine: lualatex
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{amsmath,latexsym,amsfonts,amsthm,cleveref}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = TRUE)
+```
+
+
+```{r}
+require(tidyverse)
+require(tidymodels)
+require(gbm)
+require(ISLR)
+```
+
+
+# Tree-based Methods ISL: 8.4
+
+
+## Problem 10
+
+
+### (a)
+
+
+```{r}
+data <- Hitters %>% 
+    drop_na("Salary") %>% 
+    mutate(Salary = log(Salary))
+```
+
+
+### (b)
+
+
+```{r}
+# train and test split
+data_train <- data[1:200,]
+data_test <- data[201:nrow(data),]
+```
+
+
+### (c)
+
+
+```{r}
+# boosted tree model through different learning rate threshold
+set.seed(2022)
+train_error <- seq(-10, -0.2, by = 0.1) %>% 
+    map_dfr(~ tibble(
+        `lambda` = 10^(.x),
+        `mse` = mean(((gbm(Salary ~ ., data = data_train, distribution = "gaussian",
+                           n.trees = 1000, shrinkage = 10^(.x)) %>% 
+            predict(data_train, n.trees = 1000)) - data_train$Salary)^2)
+    ))
+```
+
+
+```{r}
+# plot MSE in training set
+train_error %>% 
+    ggplot(aes(x = lambda, y = mse)) +
+    geom_point() + 
+    geom_line() +
+    xlab("Shrinkage / leanring rate (lambda)") +
+    ylab("MSE") +
+    theme_minimal()
+```
+
+
+### (d)
+
+
+```{r}
+# boosted tree model through different learning rate threshold
+set.seed(2022)
+test_error <- seq(-10, -0.2, by = 0.1) %>% 
+    map_dfr(~ tibble(
+        `lambda` = 10^(.x),
+        `mse` = mean(((gbm(Salary ~ ., data = data_train, distribution = "gaussian",
+                           n.trees = 1000, shrinkage = 10^(.x)) %>% 
+            predict(data_test, n.trees = 1000)) - data_test$Salary)^2)
+    ))
+```
+
+
+```{r}
+# plot MSE in testing set
+test_error %>% 
+    ggplot(aes(x = lambda, y = mse)) +
+    geom_point() + 
+    geom_line() +
+    xlab("Shrinkage / leanring rate (lambda)") +
+    ylab("MSE") +
+    theme_minimal()
+```
+
+
+```{r}
+# minimum MSE in testing set
+test_error %>% 
+    filter(mse == min(mse)) %>% 
+    knitr::kable()
+```
+
+
+### (e)
+
+
+```{r}
+# linear regression
+linear_fit <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression") %>% 
+    fit(Salary ~ ., data = data_train)
+```
+
+
+```{r}
+# MSE in testing set
+(augment(linear_fit, new_data = data_test) %>% 
+    rmse(truth = Salary, estimate = .pred) %>% 
+    pull(.estimate))^2
+```
+
+
+```{r}
+# 10-fold cross-validaation for tuning
+data_fold <- vfold_cv(data_train, v = 10)
+```
+
+
+```{r}
+# lasso regression
+lasso_model <- linear_reg(penalty = tune(), mixture = 1) %>% 
+    set_engine("glmnet") %>% 
+    set_mode("regression")
+
+lasso_receipt <- recipe(Salary ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric()) %>% 
+    step_normalize(all_predictors())
+
+lasso_workflow <- 
+    workflow() %>% 
+    add_model(lasso_model) %>% 
+    add_recipe(lasso_receipt)
+```
+
+
+```{r}
+# tuning parameter
+penalty_grid <- grid_regular(penalty(range = c(-4, 2)), levels = 50)
+
+tune_res <- lasso_workflow %>% 
+    tune_grid(
+    resamples = data_fold, 
+    grid = penalty_grid,
+    control = control_grid(save_pred = TRUE)
+)
+
+autoplot(tune_res) + theme_minimal()
+```
+
+
+```{r}
+# select best lambda based on root MSE
+best_penalty <- select_best(tune_res, metric = "rmse")
+best_penalty %>% knitr::kable()
+```
+
+
+```{r}
+# refit model based on selected lambda
+lasso_final <- finalize_workflow(lasso_workflow, best_penalty)
+lasso_final_fit <- fit(lasso_final, data = data_train)
+```
+
+
+```{r}
+# MSE in testing set
+(augment(lasso_final_fit, new_data = data_test) %>% 
+    rmse(truth = Salary, estimate = .pred) %>% 
+    pull(.estimate))^2
+```
+
+
+As shown from the output above, the test MSE of boosting is lower than the test MSE of linear regression or lasso regression.
+
+
+### (f)
+
+
+```{r}
+# final bossting model
+set.seed(2022)
+boost_final_fit <- gbm(Salary ~ ., data = data_train, distribution = "gaussian", 
+                       n.trees = 1000,
+                       shrinkage = test_error %>% filter(mse == min(mse)) %>% pull(lambda))
+summary(boost_final_fit) %>% knitr::kable()
+```
+
+
+As shown in the output above, the most important predictor is `CatBat`, followed by `CWalks`, `CRuns`, etc.
+
+
+### (g)
+
+
+```{r}
+# bagging model
+set.seed(2022)
+bag_fit <- rand_forest(mtry = .cols()) %>%
+    set_engine("randomForest", importance = TRUE) %>%
+    set_mode("regression") %>% 
+    fit(Salary ~ ., data = data_train)
+```
+
+
+```{r}
+# MSE in testing set
+(augment(bag_fit, new_data = data_test) %>% 
+    rmse(truth = Salary, estimate = .pred) %>% 
+    pull(.estimate))^2
+```
+
+
+As shown in the output above, the test MSE of bagging approach is 0.23.
+
