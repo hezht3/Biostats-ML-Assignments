@@ -2,7 +2,9 @@
 title: "Final project"
 author: "Zhengting (Johnathan) He"
 date: "2022/3/2"
-output: html_document
+output:
+  rmdformats::robobook:
+    highlight: kate
 ---
 
 
@@ -24,15 +26,18 @@ require(probably)
 ```
 
 
-# Data preparation
-
-
 ```{r}
 load("./DATA/nhanes2003-2004.Rda")
 ```
 
 
-I first dropped participants age less than 50 years old according to the `RIDAGEYR` variable (Age at Screening Adjudicated). Then, I limited the data set to the outcome variable `mortstat`, and the list of informative predictors:
+# 1. Preparation for modeling
+
+
+## 1.1 Data cleaning
+
+
+Since the goal of this project is to predict the mortality status for participants 50 years and older, I first drop participants age less than 50 years old according to the `RIDAGEYR` variable (Age at Screening Adjudicated). Then, I limit the data set to the outcome variable `mortstat`, and the list of informative predictors.
 
 
 ```{r}
@@ -45,7 +50,7 @@ data <- nhanes2003_2004 %>%
 ```
 
 
-I then checked the class and distribution of all variables. All predictors are read in as categorical variables, which are not appropriate for predictors in continuous scale, including `RIDAGEYR`, `BMXWAIST`, `BPXML1`, `BPXSY1`, `BPXDI1`, `BMXBMI`, and `LBXRDW`, according to the codebook. The following data cleaning code aims to assign correct class for each variable, and change non-informative values (e.g., answer as "refused" or "don't know") to `NA`. I also add variable label for each variable, and add value labels for categorical variables:
+I then check the class and distribution of all variables. All predictors are read in as categorical variables, which are not appropriate for predictors in continuous scale, including `RIDAGEYR`, `BMXWAIST`, `BPXML1`, `BPXSY1`, `BPXDI1`, `BMXBMI`, and `LBXRDW`, according to the codebook. The following data cleaning code aims to assign correct class for each variable, and change non-informative values (e.g., answer as "refused" or "don't know") to `NA`. I also add variable label for each variable, and add value labels for categorical variables.
 
 
 ```{r}
@@ -144,19 +149,35 @@ data <- data %>%
 ```
 
 
-I then drop observations with missing value in the outcome variable or in any predictors. The following results show the summary statistics of final data set used in model building:
+After checking on the values and distributions of continuous variables, there are several observations with outside of normal physiological range values in variable `BPXDI1`. The following code drops these observations.
+
+
+```{r}
+data <- data %>% 
+    mutate(BPXDI1 = ifelse(BPXDI1 <= 20, NA, BPXDI1))
+```
+
+
+I then drop observations with missing values in the outcome variable `mortstat` or in any predictors.
 
 
 ```{r}
 data <- data %>% drop_na()
+```
+
+
+The following results show the summary statistics of final data set used in model building.
+
+
+```{r}
 skimr::skim(data)
 ```
 
 
-# Exploratory data analysis
+## 1.2 Exploratory data analysis
 
 
-Below shows the relationship between each continuous variables and the outcome:
+Below shows the pairwise relationships of each continuous variables and the outcome variable `mortstat`.
 
 
 ```{r, fig.width = 10, fig.height = 10}
@@ -168,7 +189,7 @@ data %>%
 ```
 
 
-Below shows the relationship between each categorical variables and the outcome:
+Below shows the relationships between each categorical variables and the outcome variable `mortstat`.
 
 
 ```{r, fig.width = 10, fig.height = 20}
@@ -183,39 +204,97 @@ data %>%
 ```
 
 
-# Train and test split
+Below shows the pairwise correlations of all predictors.
 
 
-I split the dataset into training set and testing set using a 8:2 ratio stratified by mortality status, and create a 10 fold cross-validation data set on the training set:
+```{r}
+data %>% 
+    select(-mortstat) %>% 
+    mutate(across(everything(),
+                  ~ as.numeric(.x))) %>% 
+    corrr::correlate() %>% 
+    corrr::rplot(colours = c("indianred2", "black", "skyblue1")) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+## 1.3 Train and test split
+
+
+I split the data set into training set and testing set using a 8:2 ratio stratified by mortality status, and create a 10 fold cross-validation data set on the training set.
 
 
 ```{r}
 set.seed(123)
 data_split <- initial_split(data, strata = "mortstat", prop = 8/10)
 
-data_train <- data_split %>% training()
-data_test <- data_split %>% testing()
+data_train <- training(data_split)
+data_test <- testing(data_split)
 
-data_fold <- vfold_cv(data_train, v = 10)
+data_fold <- vfold_cv(data_train, strata = "mortstat", v = 10)
 ```
 
 
-# Logistic regression
+# 2. Generalized linear model
 
 
-I first fit a logistic regression model using all predictors:
+## 2.1 Logistic regression
+
+
+### 2.1.1 Fit logistic regression model
+
+
+I first specify a logistic regression model. Predictors which are closely correlated ($r > 0.8$) are dropped, and all else predictors are used in this model.
 
 
 ```{r}
-logistic_fit <- logistic_reg() %>%
-    set_engine("glm") %>% 
-    set_mode("classification") %>% 
-    fit(mortstat ~ ., data = data_train)
-
-augment(logistic_fit, new_data = data_test) %>% 
-    conf_mat(truth = mortstat, estimate = .pred_class) %>%
-    autoplot(type = "heatmap")
+# specify recipe, exclude variables closely correlated (r = 0.8)
+logistic_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric()) %>% 
+    step_corr(threshold = 0.8)
 ```
+
+
+```{r}
+# specify logistic model
+logistic_spec <- logistic_reg() %>%
+    set_engine("glm") %>% 
+    set_mode("classification")
+```
+
+
+```{r}
+# build logistic model workflow
+logistic_workflow <- 
+    workflow() %>% 
+    add_model(logistic_spec) %>% 
+    add_recipe(logistic_recipe)
+```
+
+
+I then fit the model using the training set.
+
+
+```{r}
+logistic_fit <- logistic_workflow %>%
+    fit(data = data_train)
+```
+
+
+### 2.1.2 Evaluate model performance
+
+
+The fitted model's performance is estimated in the testing set. The threshold for classification is a predicted probability higher than 50%. Below shows the confusion matrix.
+
+
+```{r}
+augment(logistic_fit, new_data = data_test) %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and area under the ROC curve (AUC).
 
 
 ```{r}
@@ -231,96 +310,713 @@ augment(logistic_fit, new_data = data_test) %>%
 ```
 
 
-As shown from the output above, the model results in a moderate accuracy of 82.1% and an AUC of 0.821, a relative high sensitivity of 92.5%, but a low specificity of 41.8%.
+As shown from the output above, the model results in an accuracy of 82.5% and an AUC of 0.843, a relative high sensitivity of 93.3%, but a low specificity of 39.6%.
 
 
-# Logistic regression with feature selection penalty (lasso regression)
+### 2.1.3 Model post-processing
 
 
-I further fit the logistic regression by adding a feature selection penalty using lasso regression, to avoid overfitting issues, especially considering many predictors are taken into account.
+The results above indicate that the model lead to a high false negative; thus, the threshold of a predicted probability of 50% for classification may not be the best choice. I further balance sensitivity and specificity using different predicted probability threshold. The best threshold is selected based on a higher value in the $\text{j_index}$:[^1]
+
+$$
+\text{j_index} = \text{sens} + \text{spec} − 1
+$$
+
+[^1]: Davis Vaughan. Where does probably fit in? URL: https://probably.tidymodels.org/articles/where-to-use.html.
+
+
+I first calculate sensitivity, specificity, and j_index using different predicted probability threshold.
 
 
 ```{r}
-# model
-logistic_model <- logistic_reg(penalty = tune(), mixture = 1) %>% 
-    set_engine("glmnet") %>% 
-    set_mode("classification")
+data_threshold <- logistic_fit %>%
+    augment(new_data = data_test) %>% 
+    threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
+    filter(.metric != "distance") %>%
+    mutate(group = case_when(.metric == "sens" | .metric == "spec" ~ "1",
+                             TRUE ~ "2"))
+```
 
-# receipt
-logistic_receipt <- recipe(mortstat ~ ., data = data_train) %>% 
-    step_dummy(all_nominal(), - all_outcomes()) %>%
-    step_zv(all_numeric()) %>% 
-    step_normalize(all_predictors())
 
-# workflow
-logistic_workflow <- 
-    workflow() %>% 
-    add_model(logistic_model) %>% 
-    add_recipe(logistic_receipt)
+I then select the predicted probability threshold with highest $\text{j_index}$.
+
+
+```{r}
+max_j_index_threshold <- data_threshold %>%
+    filter(.metric == "j_index") %>%
+    filter(.estimate == max(.estimate)) %>%
+    pull(.threshold)
+```
+
+
+Below shows the values of sensitivity, specificity, and $\text{j_index}$ across different predicted probability threshold.
+
+
+```{r}
+ggplot(data_threshold, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
+    geom_line() +
+    scale_color_viridis_d(end = 0.9) +
+    scale_alpha_manual(values = c(.4, 1), guide = "none") +
+    geom_vline(xintercept = max_j_index_threshold, alpha = .6, color = "grey30") +
+    labs(x = "'Good' Threshold\n(above this value is considered 'good')",
+         y = "Metric Estimate",
+         title = "Balancing performance by varying the threshold",
+         subtitle = "Vertical line = Max J-Index") +
+    theme_minimal()
+```
+
+
+The best predicted probability threshold selected is shown below.
+
+
+```{r}
+data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
 ```
 
 
 ```{r}
-# tuning parameter using 10-fold cross-validation
-penalty_grid <- grid_regular(penalty(range = c(-4, 2)), levels = 50)
+best_threshold <- data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>%
+    filter(.metric == "j_index") %>% 
+    pull(.threshold)
+best_threshold
+```
 
-tune_res <- logistic_workflow %>% 
+
+I then re-classify the mortality status in the testing set using the best predicted probability threshold selected.
+
+
+```{r}
+data_preds_final <- logistic_fit %>%
+    augment(new_data = data_test) %>% 
+    mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
+                                             threshold = best_threshold))
+```
+
+
+Below shows the confusion matrix using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and AUC, using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
+    kable()
+```
+
+
+As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 75.7%, a sensitivity of 74.8%, a specificity of 79.2%, and an AUC of 0.843.
+
+
+## 2.2 Logistic regression with feature selection penalty (lasso regression)
+
+
+### 2.2.1 Fit lasso regression model
+
+
+I further fit the logistic regression by adding a feature selection penalty using lasso regression, to address over-fitting issues, especially considering many predictors are taken into account. All predictors are normalized before fitting the model.
+
+
+```{r}
+# specify recipe
+lasso_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric()) %>% 
+    step_normalize(all_predictors())
+```
+
+
+```{r}
+# specify lasso model
+lasso_spec <- logistic_reg(penalty = tune(), mixture = 1) %>% 
+    set_engine("glmnet") %>% 
+    set_mode("classification")
+```
+
+
+```{r}
+# build lasso model workflow
+lasso_workflow <- 
+    workflow() %>% 
+    add_model(lasso_spec) %>% 
+    add_recipe(lasso_recipe)
+```
+
+
+```{r}
+# tuning parameter
+penalty_grid <- grid_regular(penalty(range = c(-4, 2)), levels = 50)
+```
+
+
+The best tuning parameter $\lambda$ is chosen using 10-fold cross-validation, according to the AUC metric.
+
+
+```{r}
+set.seed(234)
+tune_res <- lasso_workflow %>% 
     tune_grid(
     resamples = data_fold, 
     grid = penalty_grid,
     control = control_grid(save_pred = TRUE)
 )
 
-autoplot(tune_res)
+autoplot(tune_res) + theme_minimal()
 ```
 
 
 ```{r}
-# select the best penalty based on AUC
-best_penalty <- select_best(tune_res, metric = "accuracy")
+best_penalty <- select_best(tune_res, metric = "roc_auc")
 best_penalty
 ```
 
 
+I then re-fit the lasso regression model using the whole training set.
+
+
 ```{r}
-# refit the model using the whole training set
-logistic_final <- finalize_workflow(logistic_workflow, best_penalty)
-logistic_final_fit <- fit(logistic_final, data = data_train)
-logistic_final_fit %>% tidy() %>% kable()
+lasso_final <- finalize_workflow(lasso_workflow, best_penalty)
+
+lasso_final_fit <- fit(lasso_final, data = data_train)
 ```
 
 
+### 2.2.2 Evaluate model performance
+
+
+The fitted model's performance is estimated in the testing set. The threshold for classification is a predicted probability higher than 50%. Below shows the confusion matrix.
+
+
 ```{r}
-augment(logistic_final_fit, new_data = data_test) %>% 
-    conf_mat(truth = mortstat, estimate = .pred_class) %>%
-    autoplot(type = "heatmap")
+data_laaso_preds <- augment(lasso_final_fit, new_data = data_test)
 ```
 
 
+Below shows the accuracy, sensitivity, specificity, and area under the ROC curve (AUC).
+
+
 ```{r}
-augment(logistic_final_fit, new_data = data_test) %>% 
+data_laaso_preds %>% 
     accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_laaso_preds %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_laaso_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_laaso_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
     kable()
+```
+
+
+As shown from the output above, the model results in an accuracy of 83.7% and an AUC of 0.846, a relative high sensitivity of 96.2%, but a low specificity of 34.0%.
+
+
+### 2.2.3 Model post-processing
+
+
+Again, the results above indicate that the model lead to a high false negative; thus, the threshold of a predicted probability of 50% for classification may not be the best choice. I further balance sensitivity and specificity using different predicted probability threshold and select best threshold based on same procedures in 2.1.3.
+
+
+I first calculate sensitivity, specificity, and j_index using different predicted probability threshold.
+
+
+```{r}
+data_threshold <- lasso_final_fit %>%
+    augment(new_data = data_test) %>% 
+    threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
+    filter(.metric != "distance") %>%
+    mutate(group = case_when(.metric == "sens" | .metric == "spec" ~ "1",
+                             TRUE ~ "2"))
+```
+
+
+I then select the predicted probability threshold with highest $\text{j_index}$.
+
+
+```{r}
+max_j_index_threshold <- data_threshold %>%
+    filter(.metric == "j_index") %>%
+    filter(.estimate == max(.estimate)) %>%
+    pull(.threshold)
+```
+
+
+Below shows the values of sensitivity, specificity, and $\text{j_index}$ across different predicted probability threshold.
+
+
+```{r}
+ggplot(data_threshold, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
+    geom_line() +
+    scale_color_viridis_d(end = 0.9) +
+    scale_alpha_manual(values = c(.4, 1), guide = "none") +
+    geom_vline(xintercept = max_j_index_threshold, alpha = .6, color = "grey30") +
+    labs(x = "'Good' Threshold\n(above this value is considered 'good')",
+         y = "Metric Estimate",
+         title = "Balancing performance by varying the threshold",
+         subtitle = "Vertical line = Max J-Index") +
+    theme_minimal()
+```
+
+
+The best predicted probability threshold selected is shown below.
+
+
+```{r}
+data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
 ```
 
 
 ```{r}
-augment(logistic_final_fit, new_data = data_test) %>% 
-    sens(truth = mortstat, estimate = .pred_class) %>% 
+best_threshold <- data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>%
+    filter(.metric == "j_index") %>% 
+    pull(.threshold)
+best_threshold
+```
+
+
+I then re-classify the mortality status in the testing set using the best predicted probability threshold selected.
+
+
+```{r}
+data_preds_final <- lasso_final_fit %>%
+    augment(new_data = data_test) %>% 
+    mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
+                                             threshold = best_threshold))
+```
+
+
+Below shows the confusion matrix using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and AUC, using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
     kable()
+```
+
+
+As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 80.2%, a sensitivity of 82.4%, a specificity of 71.7%, and an AUC of 0.846.
+
+
+# 3. Tree-Based Methods
+
+
+## 3.1 Random Forests
+
+
+### 3.1.1 Fit random forests model
+
+
+I further fit a random forests model to predict mortality status. The predictor numbers used in the model is $\sqrt{37-1}=6$.
+
+
+```{r}
+# specify recipe
+rf_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric())
 ```
 
 
 ```{r}
-augment(logistic_final_fit, new_data = data_test) %>% 
-    spec(truth = mortstat, estimate = .pred_class) %>% 
-    kable()
+# specify random forests model
+rf_spec <- rand_forest(mtry = 6) %>%
+    set_engine("randomForest", importance = TRUE) %>%
+    set_mode("classification")
 ```
 
 
 ```{r}
-augment(logistic_final_fit, new_data = data_test) %>% 
-    roc_auc(truth = mortstat, `.pred_Assumed alive`) %>% 
+# build random forests model workflow
+rf_workflow <- 
+    workflow() %>% 
+    add_model(rf_spec) %>% 
+    add_recipe(rf_recipe)
+```
+
+
+I then fit the model using the training set.
+
+
+```{r}
+rf_fit <- rf_workflow %>%
+    fit(data = data_train)
+```
+
+
+### 3.1.2 Evaluate model performance
+
+
+The fitted model's performance is estimated in the testing set. The threshold for classification is a predicted probability higher than 50%. Below shows the confusion matrix.
+
+
+```{r}
+data_preds <- rf_fit %>%
+    augment(new_data = data_test)
+```
+
+
+```{r}
+data_preds %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and area under the ROC curve (AUC).
+
+
+```{r}
+data_preds %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
     kable()
 ```
+
+
+As shown from the output above, the model results in an accuracy of 81.7% and an AUC of 0.863, a relative high sensitivity of 94.8%, but a low specificity of 30.2%.
+
+
+### 3.1.3 Model post-processing
+
+
+Again, the results above indicate that the model lead to a high false negative; thus, the threshold of a predicted probability of 50% for classification may not be the best choice. I further balance sensitivity and specificity using different predicted probability threshold and select best threshold based on same procedures in 2.1.3 and 2.2.3.
+
+
+I first calculate sensitivity, specificity, and j_index using different predicted probability threshold.
+
+
+```{r}
+data_threshold <- rf_fit %>%
+    augment(new_data = data_test) %>% 
+    threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
+    filter(.metric != "distance") %>%
+    mutate(group = case_when(.metric == "sens" | .metric == "spec" ~ "1",
+                             TRUE ~ "2"))
+```
+
+
+I then select the predicted probability threshold with highest $\text{j_index}$.
+
+
+```{r}
+max_j_index_threshold <- data_threshold %>%
+    filter(.metric == "j_index") %>%
+    filter(.estimate == max(.estimate)) %>%
+    pull(.threshold)
+```
+
+
+Below shows the values of sensitivity, specificity, and $\text{j_index}$ across different predicted probability threshold.
+
+
+```{r}
+ggplot(data_threshold, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
+    geom_line() +
+    scale_color_viridis_d(end = 0.9) +
+    scale_alpha_manual(values = c(.4, 1), guide = "none") +
+    geom_vline(xintercept = max_j_index_threshold, alpha = .6, color = "grey30") +
+    labs(x = "'Good' Threshold\n(above this value is considered 'good')",
+         y = "Metric Estimate",
+         title = "Balancing performance by varying the threshold",
+         subtitle = "Vertical line = Max J-Index") +
+    theme_minimal()
+```
+
+
+The best predicted probability threshold selected is shown below.
+
+
+```{r}
+data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
+```
+
+
+```{r}
+best_threshold <- data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>%
+    filter(.metric == "j_index") %>% 
+    pull(.threshold)
+best_threshold
+```
+
+
+I then re-classify the mortality status in the testing set using the best predicted probability threshold selected.
+
+
+```{r}
+data_preds_final <- rf_fit %>%
+    augment(new_data = data_test) %>% 
+    mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
+                                             threshold = best_threshold))
+```
+
+
+Below shows the confusion matrix using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and AUC, using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
+    kable()
+```
+
+
+As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 80.2%, a sensitivity of 81.4%, a specificity of 75.5%, and an AUC of 0.863.
+
+
+## 3.2 Boosting trees
+
+
+### 3.2.1 Fit boosting trees model
+
+
+The random forests model do not show comparable performance with the logistic regression with regularization (lasso regression). I further try boosting trees model to increase the prediction performance.
+
+
+```{r}
+# specify boosting trees model
+xgb_spec <- boost_tree(trees = 1000,
+                       tree_depth = tune(),
+                       min_n = tune(),
+                       loss_reduction = tune(),
+                       sample_size = tune(),
+                       mtry = tune(),
+                       learn_rate = tune()) %>% 
+    set_engine("xgboost") %>% 
+    set_mode("classification")
+```
+
+
+```{r}
+# build boosting trees workflow
+xgb_wf <- workflow() %>%
+    add_formula(mortstat ~ .) %>%
+    add_model(xgb_spec)
+```
+
+
+Below code specify range of possible values for tuning parameters.
+
+
+```{r}
+# tuning parameters
+xgb_grid <- grid_latin_hypercube(tree_depth(),
+                                 min_n(),
+                                 loss_reduction(),
+                                 sample_size = sample_prop(),
+                                 finalize(mtry(), data_train),
+                                 learn_rate(),
+                                 size = 30)
+```
+
+
+The best tuning parameters are chosen using 10-fold cross-validation, according to the AUC metric.
+
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(234)
+xgb_res <- tune_grid(xgb_wf,
+                     resamples = data_fold,
+                     grid = xgb_grid,
+                     control = control_grid(save_pred = TRUE))
+```
+
+
+```{r}
+best_auc <- select_best(xgb_res, "roc_auc")
+best_auc %>% kable()
+```
+
+
+I then re-fit the boosting trees model using the whole training set.
+
+
+```{r}
+final_xgb <- finalize_workflow(xgb_wf, best_auc)
+final_xgb
+```
+
+
+```{r}
+final_xgb_fit <- fit(final_xgb, data = data_train)
+```
+
+
+### 3.2.2 Evaluate model performance
+
+
+The fitted model's performance is estimated in the testing set. The threshold for classification is a predicted probability higher than 50%. Below shows the confusion matrix.
+
+
+```{r}
+data_preds <- final_xgb_fit %>%
+    augment(new_data = data_test)
+```
+
+
+```{r}
+data_preds %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and area under the ROC curve (AUC).
+
+
+```{r}
+data_preds %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
+    kable()
+```
+
+
+As shown from the output above, the model results in an accuracy of 83.7% and an AUC of 0.861, a relative high sensitivity of 94.8%, but a low specificity of 39.6%.
+
+
+### 3.2.3 Model post-processing
+
+
+Again, the results above indicate that the model lead to a high false negative; thus, the threshold of a predicted probability of 50% for classification may not be the best choice. I further balance sensitivity and specificity using different predicted probability threshold and select best threshold based on same procedures in 2.1.3, 2.2.3, and 3.1.3.
+
+
+I first calculate sensitivity, specificity, and j_index using different predicted probability threshold.
+
+
+```{r}
+data_threshold <- final_xgb_fit %>%
+    augment(new_data = data_test) %>% 
+    threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
+    filter(.metric != "distance") %>%
+    mutate(group = case_when(.metric == "sens" | .metric == "spec" ~ "1",
+                             TRUE ~ "2"))
+```
+
+
+I then select the predicted probability threshold with highest $\text{j_index}$.
+
+
+```{r}
+max_j_index_threshold <- data_threshold %>%
+    filter(.metric == "j_index") %>%
+    filter(.estimate == max(.estimate)) %>%
+    pull(.threshold)
+```
+
+
+Below shows the values of sensitivity, specificity, and $\text{j_index}$ across different predicted probability threshold.
+
+
+```{r}
+ggplot(data_threshold, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
+    geom_line() +
+    scale_color_viridis_d(end = 0.9) +
+    scale_alpha_manual(values = c(.4, 1), guide = "none") +
+    geom_vline(xintercept = max_j_index_threshold, alpha = .6, color = "grey30") +
+    labs(x = "'Good' Threshold\n(above this value is considered 'good')",
+         y = "Metric Estimate",
+         title = "Balancing performance by varying the threshold",
+         subtitle = "Vertical line = Max J-Index") +
+    theme_minimal()
+```
+
+
+The best predicted probability threshold selected is shown below.
+
+
+```{r}
+data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
+```
+
+
+```{r}
+best_threshold <- data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>%
+    filter(.metric == "j_index") %>% 
+    pull(.threshold)
+best_threshold
+```
+
+
+I then re-classify the mortality status in the testing set using the best predicted probability threshold selected.
+
+
+```{r}
+data_preds_final <- final_xgb_fit %>%
+    augment(new_data = data_test) %>% 
+    mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
+                                             threshold = best_threshold))
+```
+
+
+Below shows the confusion matrix using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)
+```
+
+
+Below shows the accuracy, sensitivity, specificity, and AUC, using the best predicted probability threshold selected, balancing sensitivity and specificity.
+
+
+```{r}
+data_preds_final %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`)) %>% 
+    kable()
+```
+
+
+As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 81.4%, a sensitivity of 83.3%, a specificity of 73.6%, and an AUC of 0.861.
 
