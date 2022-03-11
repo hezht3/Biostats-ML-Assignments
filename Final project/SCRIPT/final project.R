@@ -2,6 +2,7 @@ require(tidyverse)
 require(data.table)
 require(tidymodels)
 require(probably)
+require(vip)
 
 setwd("D:/OneDrive - Johns Hopkins/Course/140.644.01 - Statistical Machine Learning Methods, Theory, and Applications/Assignments/biostats644-Assignments/Final project")
 
@@ -184,6 +185,10 @@ logistic_workflow <-
 logistic_fit <- logistic_workflow %>%
     fit(data = data_train)   # fit logistic model in training set
 
+logistic_fit %>% tidy()   # coefficients
+
+glance(logistic_fit)
+
 
 ### Evaluate model performance
 
@@ -273,6 +278,7 @@ lasso_workflow <-
 
 penalty_grid <- grid_regular(penalty(range = c(-4, 2)), levels = 50)   # tuning parameter
 
+set.seed(234)
 tune_res <- lasso_workflow %>% 
     tune_grid(
     resamples = data_fold, 
@@ -287,6 +293,8 @@ best_penalty <- select_best(tune_res, metric = "roc_auc")
 lasso_final <- finalize_workflow(lasso_workflow, best_penalty)
 
 lasso_final_fit <- fit(lasso_final, data = data_train)
+
+lasso_final_fit %>% tidy() %>% filter(estimate != 0)   # predictors and coefficients
 
 
 ### Evaluate model performance
@@ -360,23 +368,48 @@ data_preds_final %>%
 ## RandomForest
 
 
+### Fit random forest model
+
+
 rf_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
     step_dummy(all_nominal(), - all_outcomes()) %>%
     step_zv(all_numeric())   # specify recipe
 
-rf_spec <- rand_forest(mtry = 6) %>%
-    set_engine("randomForest", importance = TRUE) %>%
+rf_spec <- rand_forest(mtry = 6, trees = 1000, min_n = tune()) %>%
+    set_engine("ranger") %>%
     set_mode("classification")   # specify random forests model
 
-rf_workflow <- 
-    workflow() %>% 
+rf_workflow <- workflow() %>% 
     add_model(rf_spec) %>% 
     add_recipe(rf_recipe)   # build random forests model workflow
 
-rf_fit <- rf_workflow %>%
-    fit(data = data_train)
+set.seed(345)
+tune_res <- tune_grid(
+    rf_workflow,
+    resamples = data_fold,
+    grid = 20
+)
 
-data_preds <- rf_fit %>%
+tune_res %>% autoplot() + theme_minimal()
+
+best_min_n <- select_best(tune_res, "roc_auc")
+best_min_n
+
+rf_final <- finalize_workflow(rf_workflow, best_min_n)
+
+rf_final_fit <- rf_final %>% fit(data = data_train)
+rf_final_fit
+
+rf_final <- finalize_model(rf_spec, best_min_n)
+rf_final %>%
+    set_engine("ranger", importance = "permutation") %>%
+    fit(mortstat ~ .,
+        data = data_train
+    ) %>%
+    vip(geom = "col") +
+    theme_minimal()   # variance importance plot
+
+data_preds <- rf_final_fit %>%
     augment(new_data = data_test)
 
 data_preds %>% 
@@ -388,7 +421,7 @@ data_preds %>%
     bind_rows(data_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
 
-data_threshold <- rf_fit %>%
+data_threshold <- rf_final_fit %>%
     augment(new_data = data_test) %>% 
     threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
     filter(.metric != "distance") %>%
@@ -420,7 +453,7 @@ best_threshold <- data_threshold %>%
     filter(.metric == "j_index") %>% 
     pull(.threshold)
 
-data_preds_final <- rf_fit %>%
+data_preds_final <- rf_final_fit %>%
     augment(new_data = data_test) %>% 
     mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
                                              threshold = best_threshold))
@@ -438,6 +471,10 @@ data_preds_final %>%
 
 ### XGBoost model specification
 
+xgb_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric())   # specify recipe
+
 xgb_spec <- boost_tree(
     trees = 1000, 
     tree_depth = tune(), min_n = tune(), 
@@ -447,6 +484,10 @@ xgb_spec <- boost_tree(
 ) %>% 
     set_engine("xgboost") %>% 
     set_mode("classification")
+
+xgb_workflow <- workflow() %>%
+    add_model(xgb_spec) %>% 
+    add_recipe(xgb_recipe)
 
 xgb_grid <- grid_latin_hypercube(
     tree_depth(),
@@ -458,35 +499,33 @@ xgb_grid <- grid_latin_hypercube(
     size = 30
 )
 
-xgb_wf <- workflow() %>%
-    add_formula(mortstat ~ .) %>%
-    add_model(xgb_spec)
-
 doParallel::registerDoParallel()
 
-set.seed(234)
+set.seed(456)
 xgb_res <- tune_grid(
-    xgb_wf,
+    xgb_workflow,
     resamples = data_fold,
     grid = xgb_grid,
     control = control_grid(save_pred = TRUE)
 )
-
-xgb_res
+xgb_res %>% autoplot() + theme_minimal()
 
 best_auc <- select_best(xgb_res, "roc_auc")
 best_auc
 
-final_xgb <- finalize_workflow(
-    xgb_wf,
-    best_auc
-)
+xgb_final <- finalize_workflow(xgb_workflow, best_auc)
 
-final_xgb
+xgb_final_fit <- fit(xgb_final, data = data_train)
+xgb_final_fit
 
-final_xgb_fit <- fit(final_xgb, data = data_train)
+xgb_final <- finalize_model(xgb_spec, best_auc)
+xgb_final %>%
+    set_engine("xgboost") %>%
+    fit(mortstat ~ ., data = data_train) %>%
+    vip(geom = "col") +
+    theme_minimal()   # variance importance plot
 
-data_preds <- final_xgb_fit %>%
+data_preds <- xgb_final_fit %>%
     augment(new_data = data_test)
 
 data_preds %>% 
@@ -498,7 +537,7 @@ data_preds %>%
     bind_rows(data_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
 
-data_threshold <- final_xgb_fit %>%
+data_threshold <- xgb_final_fit %>%
     augment(new_data = data_test) %>% 
     threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
     filter(.metric != "distance") %>%
@@ -530,7 +569,7 @@ best_threshold <- data_threshold %>%
     filter(.metric == "j_index") %>% 
     pull(.threshold)
 
-data_preds_final <- final_xgb_fit %>%
+data_preds_final <- xgb_final_fit %>%
     augment(new_data = data_test) %>% 
     mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
                                              threshold = best_threshold))

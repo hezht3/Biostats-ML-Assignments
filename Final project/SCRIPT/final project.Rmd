@@ -283,6 +283,19 @@ logistic_fit <- logistic_workflow %>%
 ```
 
 
+Below shows the coefficients and statistics associated with the fitted model.
+
+
+```{r}
+logistic_fit %>% tidy() %>% kable()
+```
+
+
+```{r}
+glance(logistic_fit) %>% kable()
+```
+
+
 ### 2.1.2 Evaluate model performance
 
 
@@ -495,11 +508,13 @@ lasso_final_fit <- fit(lasso_final, data = data_train)
 ```
 
 
-The coefficients of predictors are:
-
+Below shows the lasso selected predictors and its coefficients.
 
 ```{r}
-lasso_final_fit %>% tidy() %>% kable()
+lasso_final_fit %>%
+    tidy() %>%
+    filter(estimate != 0) %>%
+    kable()
 ```
 
 
@@ -654,27 +669,63 @@ rf_recipe <- recipe(mortstat ~ ., data = data_train) %>%
 
 ```{r}
 # specify random forests model
-rf_spec <- rand_forest(mtry = 6) %>%
-    set_engine("randomForest", importance = TRUE) %>%
+rf_spec <- rand_forest(mtry = 6, trees = 1000, min_n = tune()) %>%
+    set_engine("ranger") %>%
     set_mode("classification")
 ```
 
 
 ```{r}
 # build random forests model workflow
-rf_workflow <- 
-    workflow() %>% 
+rf_workflow <- workflow() %>% 
     add_model(rf_spec) %>% 
     add_recipe(rf_recipe)
 ```
 
 
-I then fit the model using the training set.
+The best tuning parameter $min_n$ (the number of observations needed to keep splitting nodes) is chosen using 10-fold cross-validation, according to the AUC metric.
 
 
 ```{r}
-rf_fit <- rf_workflow %>%
-    fit(data = data_train)
+# tuning parameter
+set.seed(345)
+tune_res <- tune_grid(
+    rf_workflow,
+    resamples = data_fold,
+    grid = 20
+)
+
+tune_res %>% autoplot() + theme_minimal()
+```
+
+
+```{r}
+best_min_n <- select_best(tune_res, "roc_auc")
+best_min_n
+```
+
+
+I then re-fit the random forests model using the whole training set.
+
+
+```{r}
+rf_final <- finalize_workflow(rf_workflow, best_min_n)
+
+rf_final_fit <- rf_final %>% fit(data = data_train)
+rf_final_fit
+```
+
+
+Below shows the variance importance plot of predictors.
+
+
+```{r}
+rf_final <- finalize_model(rf_spec, best_min_n)
+rf_final %>%
+    set_engine("ranger", importance = "permutation") %>%
+    fit(mortstat ~ ., data = data_train) %>%
+    vip(geom = "col") +
+    theme_minimal()
 ```
 
 
@@ -685,7 +736,7 @@ The fitted model's performance is estimated in the testing set. The threshold fo
 
 
 ```{r}
-data_preds <- rf_fit %>%
+data_preds <- rf_final_fit %>%
     augment(new_data = data_test)
 ```
 
@@ -709,7 +760,7 @@ data_preds %>%
 ```
 
 
-As shown from the output above, the model results in an accuracy of 81.7% and an AUC of 0.863, a relative high sensitivity of 94.8%, but a low specificity of 30.2%.
+As shown from the output above, the model results in an accuracy of 82.9% and an AUC of 0.864, a relative high sensitivity of 95.7%, but a low specificity of 32.1%.
 
 
 ### 3.1.3 Model post-processing
@@ -722,7 +773,7 @@ I first calculate sensitivity, specificity, and j_index using different predicte
 
 
 ```{r}
-data_threshold <- rf_fit %>%
+data_threshold <- rf_final_fit %>%
     augment(new_data = data_test) %>% 
     threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
     filter(.metric != "distance") %>%
@@ -782,7 +833,7 @@ I then re-classify the mortality status in the testing set using the best predic
 
 
 ```{r}
-data_preds_final <- rf_fit %>%
+data_preds_final <- rf_final_fit %>%
     augment(new_data = data_test) %>% 
     mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
                                              threshold = best_threshold))
@@ -811,7 +862,7 @@ data_preds_final %>%
 ```
 
 
-As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 80.2%, a sensitivity of 81.4%, a specificity of 75.5%, and an AUC of 0.863.
+As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 81.7%, a sensitivity of 84.3%, a specificity of 71.7%, and an AUC of 0.864.
 
 
 ## 3.2 Boosting trees
@@ -824,13 +875,19 @@ I further try boosting trees model to increase the prediction performance.
 
 
 ```{r}
+# specify recipe
+xgb_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric())
+```
+
+
+```{r}
 # specify boosting trees model
-xgb_spec <- boost_tree(trees = 1000,
-                       tree_depth = tune(),
-                       min_n = tune(),
+xgb_spec <- boost_tree(trees = 1000, 
+                       tree_depth = tune(), min_n = tune(), 
                        loss_reduction = tune(),
-                       sample_size = tune(),
-                       mtry = tune(),
+                       sample_size = tune(), mtry = tune(),
                        learn_rate = tune()) %>% 
     set_engine("xgboost") %>% 
     set_mode("classification")
@@ -866,11 +923,13 @@ The best tuning parameters are chosen using 10-fold cross-validation, according 
 ```{r}
 doParallel::registerDoParallel()
 
-set.seed(234)
-xgb_res <- tune_grid(xgb_wf,
+set.seed(456)
+xgb_res <- tune_grid(xgb_workflow,
                      resamples = data_fold,
                      grid = xgb_grid,
                      control = control_grid(save_pred = TRUE))
+
+xgb_res %>% autoplot() + theme_minimal()
 ```
 
 
@@ -884,21 +943,23 @@ I then re-fit the boosting trees model using the whole training set.
 
 
 ```{r}
-final_xgb <- finalize_workflow(xgb_wf, best_auc)
-final_xgb
+xgb_final <- finalize_workflow(xgb_workflow, best_auc)
+
+xgb_final_fit <- fit(xgb_final, data = data_train)
+xgb_final_fit
 ```
 
 
-```{r}
-final_xgb_fit <- fit(final_xgb, data = data_train)
-```
-
-
-The variable importance plot is shown below.
+Below shows the variance importance plot of predictors.
 
 
 ```{r}
-vip(final_xgb_fit)
+xgb_final <- finalize_model(xgb_spec, best_auc)
+xgb_final %>%
+    set_engine("xgboost") %>%
+    fit(mortstat ~ ., data = data_train) %>%
+    vip(geom = "col") +
+    theme_minimal()
 ```
 
 
@@ -909,7 +970,7 @@ The fitted model's performance is estimated in the testing set. The threshold fo
 
 
 ```{r}
-data_preds <- final_xgb_fit %>%
+data_preds <- xgb_final_fit %>%
     augment(new_data = data_test)
 ```
 
@@ -933,7 +994,7 @@ data_preds %>%
 ```
 
 
-As shown from the output above, the model results in an accuracy of 83.7% and an AUC of 0.861, a relative high sensitivity of 94.8%, but a low specificity of 39.6%.
+As shown from the output above, the model results in an accuracy of 84.0% and an AUC of 0.858, a relative high sensitivity of 96.2%, but a low specificity of 35.8%.
 
 
 ### 3.2.3 Model post-processing
@@ -946,7 +1007,7 @@ I first calculate sensitivity, specificity, and j_index using different predicte
 
 
 ```{r}
-data_threshold <- final_xgb_fit %>%
+data_threshold <- xgb_final_fit %>%
     augment(new_data = data_test) %>% 
     threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
     filter(.metric != "distance") %>%
@@ -1006,7 +1067,7 @@ I then re-classify the mortality status in the testing set using the best predic
 
 
 ```{r}
-data_preds_final <- final_xgb_fit %>%
+data_preds_final <- xgb_final_fit %>%
     augment(new_data = data_test) %>% 
     mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
                                              threshold = best_threshold))
@@ -1035,5 +1096,4 @@ data_preds_final %>%
 ```
 
 
-As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 81.4%, a sensitivity of 83.3%, a specificity of 73.6%, and an AUC of 0.861.
-
+As shown from the output above, after balancing sensitivity and specificity, the model results in an accuracy of 79.1%, a sensitivity of 79.0%, a specificity of 79.2%, and an AUC of 0.858.
