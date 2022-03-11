@@ -23,7 +23,352 @@ require(tidyverse)
 require(tidymodels)
 require(gbm)
 require(ISLR)
+require(e1071)
 ```
+
+
+# Support Vector Machines ISL: 9.7
+
+
+## Problem 7
+
+
+### (a)
+
+
+```{r}
+# create binary class according to gas mileage
+Auto <- Auto %>% 
+    mutate(mpg_bi = ifelse(mpg > median(mpg, na.rm = TRUE), 1, 0)) %>% 
+    mutate(mpg_bi = factor(mpg_bi))
+```
+
+
+### (b)
+
+
+Below use 10-fold cross-validation to choose the value for tuning parameter `cost`. Through pilot trying, the value of `cost` associated with lowest cross-validation error is around 0.75, so I add more values for tuning around 0.75.
+
+
+```{r}
+set.seed(123)
+tune.out = tune(svm, mpg_bi ~ ., data = Auto, kernel = "linear",
+                ranges = list(cost = c(0.01, 0.1, 0.2, 0.3, 0.4, 0.5,
+                                       0.6, 0.7, 0.8, 0.9, 1, 5, 10, 100)))
+summary(tune.out)
+```
+
+
+Below shows the plot of the cross-validation errors associated with the tuning parameter `cost`.
+
+
+```{r}
+tune.out$performances %>% 
+    ggplot(aes(x = cost, y = error)) +
+    geom_point() +
+    geom_line() +
+    xlab("Cost") +
+    ylab("Cross-validation error") +
+    theme_minimal()
+```
+
+
+As shown in the output above, the 10-fold cross-validation chooses `cost` = 0.8, which is associated with the lowest error.
+
+
+Using this selected parameter, the confusion matrix is:
+
+
+```{r}
+table(true = Auto$mpg_bi, pred = predict(tune.out$best.model, newdata = Auto))
+```
+
+
+The accuracy is $(196 + 195) / (196 + 0 + 1 + 195) = 99.74\%$, the sensitivity is $195 / (195+1) = 99.49\%$, the specificity is $196 / (196 + 0) = 100\%$.
+
+
+```{r}
+# backup best support vector classifier model
+svm_linear <- tune.out$best.model
+```
+
+
+### (c)
+
+
+#### Radial basis kernals </br>
+
+
+Below use 10-fold cross-validation to choose the value for tuning parameters `cost` and `gamma`. Through pilot trying, the value of tuning parameters associated with lowest cross-validation error is around `cost` = 80 and `gamma` = 0.005, so I add more values for tuning around these values.
+
+
+```{r}
+set.seed(234)
+tune.out = tune(svm, mpg_bi ~ ., data = Auto, kernel = "radial",
+                ranges = list(cost = c(1, 5, 10, 50, 60, 70, 80, 90, 100),
+                              gamma = c(0.001, 0.0025, 0.005, 0.0075, 0.01, 0.1, 1)))
+summary(tune.out)
+```
+
+
+Below shows the plot of the cross-validation errors associated with the tuning parameters `cost` and `gamma`.
+
+
+```{r}
+tune.out$performances %>% 
+    mutate(gamma = factor(gamma)) %>% 
+    ggplot(aes(x = cost, y = error)) +
+    facet_grid(gamma ~ .) +
+    geom_point() +
+    geom_line() +
+    xlab("Cost") +
+    ylab("Cross-validation error") +
+    theme_minimal()
+```
+
+
+As shown in the output above, the 10-fold cross-validation chooses `cost` = 70 and `gamma` = 0.0025, which is associated with the lowest error.
+
+
+Using this selected parameter, the confusion matrix is:
+
+
+```{r}
+table(true = Auto$mpg_bi, pred = predict(tune.out$best.model, newdata = Auto))
+```
+
+
+The accuracy is $(196 + 194) / (196 + 0 + 2 + 194) = 99.49\%$, the sensitivity is $194 / (194+2) = 98.98\%$, the specificity is $196 / (196 + 0) = 100\%$.
+
+
+```{r}
+# backup best support vector classifier model
+svm_radial <- tune.out$best.model
+```
+
+
+### Polynomial basis kernel
+
+
+Below use 10-fold cross-validation to choose the value for tuning parameters `cost` and `gamma`. Through pilot trying, the value of tuning parameters associated with lowest cross-validation error is around `cost` = 140 with `degree` = 2, so I add more values for tuning around these values.
+
+
+```{r}
+set.seed(345)
+tune.out = tune(svm, mpg_bi ~ ., data = Auto, kernel = "polynomial",
+                ranges = list(cost = c(1, 5, 10, 50, 100,
+                                       125, 130, 135, 140, 145, 150),
+                              degree = c(2, 3, 4, 5)))
+summary(tune.out)
+```
+
+
+Below shows the plot of the cross-validation errors associated with the tuning parameters `cost` and `degree`.
+
+
+```{r}
+tune.out$performances %>% 
+    mutate(degree = factor(degree)) %>% 
+    ggplot(aes(x = cost, y = error)) +
+    facet_grid(degree ~ .) +
+    geom_point() +
+    geom_line() +
+    xlab("Cost") +
+    ylab("Cross-validation error") +
+    theme_minimal()
+```
+
+
+As shown in the output above, the 10-fold cross-validation chooses `cost` = 135 and `degree` = 2, which is associated with the lowest error.
+
+
+Using this selected parameter, the confusion matrix is:
+
+
+```{r}
+table(true = Auto$mpg_bi, pred = predict(tune.out$best.model, newdata = Auto))
+```
+
+
+The accuracy is $(96 + 193) / (96 + 100 + 3 + 193) = 73.72\%$, the sensitivity is $193 / (193+3) = 98.47\%$, the specificity is $96 / (96 + 100) = 48.98\%$.
+
+
+These results indicate that the polynomial basis kernal support vector machine model may lead to a high false negative rate.
+
+
+```{r}
+# backup best support vector classifier model
+svm_poly <- tune.out$best.model
+```
+
+
+Below compare the cross-validation error based on the tuning parameters selected in these three kernels:
+
+
+|SVM kernels|CV error|
+|:--:|:--:|
+|Linear|0.01025641|
+|Radial|0.01538462|
+|Polynomial|0.2910256|
+
+
+It appears that linear kernel (support vector classifier) has lowest cross-validation error, followed by radial basis kernel support vector machine, while polynomial basis kernel support vector machine is associated with highest cross-validation error.
+
+
+### (d)
+
+
+Classification plots for support vector classifier (linear):
+
+
+```{r, figures-side, fig.show = "hold", out.width = "50%"}
+plot(svm_linear, Auto, mpg ~ cylinders)
+plot(svm_linear, Auto, mpg ~ displacement)
+plot(svm_linear, Auto, mpg ~ horsepower)
+plot(svm_linear, Auto, mpg ~ weight)
+plot(svm_linear, Auto, mpg ~ acceleration)
+plot(svm_linear, Auto, mpg ~ year)
+plot(svm_linear, Auto, mpg ~ origin)
+```
+
+
+Classification plots for radial kernel:
+
+
+```{r, figures-side, fig.show = "hold", out.width = "50%"}
+plot(svm_radial, Auto, mpg ~ cylinders)
+plot(svm_radial, Auto, mpg ~ displacement)
+plot(svm_radial, Auto, mpg ~ horsepower)
+plot(svm_radial, Auto, mpg ~ weight)
+plot(svm_radial, Auto, mpg ~ acceleration)
+plot(svm_radial, Auto, mpg ~ year)
+plot(svm_radial, Auto, mpg ~ origin)
+```
+
+
+Classification plots for polynomial kernel:
+
+
+```{r, figures-side, fig.show = "hold", out.width = "50%"}
+plot(svm_poly, Auto, mpg ~ cylinders)
+plot(svm_poly, Auto, mpg ~ displacement)
+plot(svm_poly, Auto, mpg ~ horsepower)
+plot(svm_poly, Auto, mpg ~ weight)
+plot(svm_poly, Auto, mpg ~ acceleration)
+plot(svm_poly, Auto, mpg ~ year)
+plot(svm_poly, Auto, mpg ~ origin)
+```
+
+
+The plots seem to support the cross-validation error and prediction performance of these three kernels.
+
+
+## Problem 8
+
+
+### (a)
+
+
+```{r}
+# train and test split
+set.seed(456)
+train <- sample(1:nrow(OJ), 800)
+OJ_train <- OJ[train, ]
+OJ_test <- OJ[-train, ]
+```
+
+
+```{r}
+dim(OJ_train)
+dim(OJ_test)
+```
+
+
+### (b)
+
+
+```{r}
+svm.fit <- svm(Purchase ~ ., data = OJ_train, kernel = "linear",
+               cost = 0.01)
+summary(svm.fit)
+```
+
+
+As shown from the output above, there are 439 support vectors in the fitted support vector classifier model; among them, 219 belong to class `CH`, and 220 belong to class `MM`. The large number of support vectors (439 out of 800) indicates that the margin of the classifier may be relatively large.
+
+
+### (c)
+
+
+```{r}
+# training set confusion matrix
+table(true = OJ_train$Purchase, pred = predict(svm.fit, newdata = OJ_train))
+```
+
+
+The training error rate is $(52 + 84) / (441 + 52 + 84 + 223) = 17.00\%$. The training error rate in class `CH` is $52/(52+441) = 10.55\%$. The training error rate is class `MM` is $84/(84+223) = 27.36\%$.
+
+
+```{r}
+# testing set confusion matrix
+table(true = OJ_test$Purchase, pred = predict(svm.fit, newdata = OJ_test))
+```
+
+
+The testing error rate is $(20 + 25) / (140 + 20 + 25 + 85) = 16.67\%$. The testing error rate in class `CH` is $20/(20+140) = 12.50\%$. The testing error rate is class `MM` is $25/(25+85) = 22.73\%$.
+
+
+### (d)
+
+
+```{r}
+set.seed(567)
+tune.out <- tune(svm, Purchase ~ ., data = OJ_train, kernel = "linear",
+                 ranges = list(cost = 10^seq(-2, 
+    1, by = 0.1)))
+summary(tune.out)
+```
+
+
+Below shows the plot of the cross-validation errors associated with the tuning parameter `cost`.
+
+
+```{r}
+tune.out$performances %>% 
+    ggplot(aes(x = cost, y = error)) +
+    geom_point() +
+    geom_line() +
+    xlab("Cost") +
+    ylab("Cross-validation error") +
+    theme_minimal()
+```
+
+
+As shown from the output above, the value for the tuning parameter `cost` selected according to the lowest cross-validation error is 1.585. The cross-validation error associated with this value is 0.16875.
+
+
+### (e)
+
+
+```{r}
+# training set confusion matrix
+table(true = OJ_train$Purchase, pred = predict(tune.out$best.model, newdata = OJ_train))
+```
+
+
+The training error rate is $(54 + 83) / (439 + 54 + 83 + 224) = 17.13\%$. The training error rate in class `CH` is $54/(54+439) = 10.95\%$. The training error rate is class `MM` is $83/(83+224) = 27.04\%$.
+
+
+```{r}
+# testing set confusion matrix
+table(true = OJ_test$Purchase, pred = predict(tune.out$best.model, newdata = OJ_test))
+```
+
+
+The testing error rate is $(20 + 22) / (140 + 20 + 22 + 88) = 15.56\%$. The testing error rate in class `CH` is $20/(20+140) = 12.50\%$. The testing error rate is class `MM` is $22/(22+88) = 20.00\%$.
+
+
+As shown from the output above, the tuning parameter `cost` selected from 10-fold cross-validation leads to a lowest testing error rate, comapred to the model in (b).
 
 
 # Tree-based Methods ISL: 8.4

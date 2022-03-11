@@ -543,3 +543,34 @@ data_preds_final %>%
     bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
+
+
+# compare different model performace
+
+logistic_roc <- logistic_fit %>% 
+    augment(new_data = data_test) %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "Logistic Regression")
+
+lasso_roc <- lasso_final_fit %>% 
+    augment(new_data = data_test) %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "Lasso Regression")
+
+rf_roc <- rf_fit %>%
+    augment(new_data = data_test) %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "Random Forests")
+
+xgb_roc <- final_xgb_fit %>%
+    augment(new_data = data_test) %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "Boosting trees")
+
+bind_rows(logistic_roc, lasso_roc, rf_roc, xgb_roc) %>% 
+    ggplot(aes(x = 1 - specificity, y = sensitivity, col = model)) + 
+    geom_path(lwd = 1.5, alpha = 0.8) +
+    geom_abline(lty = 3) + 
+    coord_equal() + 
+    scale_color_viridis_d(option = "plasma", end = .6) +
+    theme_minimal()

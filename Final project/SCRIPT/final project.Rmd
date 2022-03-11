@@ -23,6 +23,7 @@ require(tidyverse)
 require(data.table)
 require(tidymodels)
 require(probably)
+require(vip)
 ```
 
 
@@ -494,6 +495,14 @@ lasso_final_fit <- fit(lasso_final, data = data_train)
 ```
 
 
+The coefficients of predictors are:
+
+
+```{r}
+lasso_final_fit %>% tidy() %>% kable()
+```
+
+
 ### 2.2.2 Evaluate model performance
 
 
@@ -811,7 +820,7 @@ As shown from the output above, after balancing sensitivity and specificity, the
 ### 3.2.1 Fit boosting trees model
 
 
-The random forests model do not show comparable performance with the logistic regression with regularization (lasso regression). I further try boosting trees model to increase the prediction performance.
+I further try boosting trees model to increase the prediction performance.
 
 
 ```{r}
@@ -882,6 +891,14 @@ final_xgb
 
 ```{r}
 final_xgb_fit <- fit(final_xgb, data = data_train)
+```
+
+
+The variable importance plot is shown below.
+
+
+```{r}
+vip(final_xgb_fit)
 ```
 
 
