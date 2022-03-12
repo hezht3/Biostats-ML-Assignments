@@ -255,6 +255,7 @@ data_preds_final %>%
     bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
 
+data_preds_logistic <- data_preds_final
 
 ## Lasso
 
@@ -361,6 +362,7 @@ data_preds_final %>%
     bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
 
+data_preds_lasso <- data_preds_final
 
 # Tree-Based Methods
 
@@ -466,6 +468,8 @@ data_preds_final %>%
     bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
+
+data_preds_rf <- data_preds_final
 
 ## Boosting trees
 
@@ -583,33 +587,251 @@ data_preds_final %>%
     bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
     bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
 
+data_preds_xgb <- data_preds_final
+
+# Support vector machines
+
+
+## Radial basis kernel
+
+
+svm_rbf_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric())   # specify recipe
+
+
+svm_rbf_spec <- svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+    set_mode("classification") %>%
+    set_engine("kernlab")   # specify radial basis kernel SVM
+
+
+svm_rbf_workflow <- workflow() %>% 
+    add_model(svm_rbf_spec) %>% 
+    add_recipe(svm_rbf_recipe)   # build radial basis kernel SVM workflow
+
+set.seed(567)
+tune_res <- tune_grid(
+    svm_rbf_workflow,
+    resamples = data_fold,
+    grid = 20
+)
+
+tune_res %>% autoplot() + theme_minimal()
+
+best_auc <- select_best(tune_res, "roc_auc")
+best_auc
+
+svm_rbf_final <- finalize_workflow(svm_rbf_workflow, best_auc)
+
+svm_rbf_final_fit <- fit(svm_rbf_final, data = data_train)
+svm_rbf_final_fit
+
+data_preds <- svm_rbf_final_fit %>%
+    augment(new_data = data_test)
+
+data_preds %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)   # confusion matrix
+
+data_preds %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
+
+
+## Polynomial basis kernel
+
+
+svm_poly_recipe <- recipe(mortstat ~ ., data = data_train) %>% 
+    step_dummy(all_nominal(), - all_outcomes()) %>%
+    step_zv(all_numeric())   # specify recipe
+
+
+svm_poly_spec <- svm_poly(cost = tune(), degree = tune()) %>%
+    set_mode("classification") %>%
+    set_engine("kernlab")   # specify polynomial basis kernel SVM model
+
+
+svm_poly_workflow <- workflow() %>% 
+    add_model(svm_poly_spec) %>% 
+    add_recipe(svm_poly_recipe)   # build polynomial basis kernel SVM workflow
+
+param_grid <- grid_regular(cost(), degree(), levels = 10)
+
+set.seed(567)
+tune_res <- tune_grid(
+    svm_poly_workflow,
+    resamples = data_fold,
+    grid = param_grid
+)
+
+tune_res %>% autoplot() + theme_minimal()
+
+best_auc <- select_best(tune_res, "roc_auc")
+best_auc
+
+svm_poly_final <- finalize_workflow(svm_poly_workflow, best_auc)
+
+svm_poly_final_fit <- fit(svm_poly_final, data = data_train)
+svm_poly_final_fit
+
+data_preds <- svm_poly_final_fit %>%
+    augment(new_data = data_test)
+
+data_preds %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)   # confusion matrix
+
+data_preds %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
+
+
+data_threshold <- svm_poly_final_fit %>%
+    augment(new_data = data_test) %>% 
+    threshold_perf(mortstat, `.pred_Assumed alive`, thresholds = seq(0.5, 1, by = 0.0025)) %>%
+    filter(.metric != "distance") %>%
+    mutate(group = case_when(.metric == "sens" | .metric == "spec" ~ "1",
+                             TRUE ~ "2"))
+
+max_j_index_threshold <- data_threshold %>%
+    filter(.metric == "j_index") %>%
+    filter(.estimate == max(.estimate)) %>%
+    pull(.threshold)
+
+ggplot(data_threshold, aes(x = .threshold, y = .estimate, color = .metric, alpha = group)) +
+    geom_line() +
+    scale_color_viridis_d(end = 0.9) +
+    scale_alpha_manual(values = c(.4, 1), guide = "none") +
+    geom_vline(xintercept = max_j_index_threshold, alpha = .6, color = "grey30") +
+    labs(x = "'Good' Threshold\n(above this value is considered 'good')",
+         y = "Metric Estimate",
+         title = "Balancing performance by varying the threshold",
+         subtitle = "Vertical line = Max J-Index") +
+    theme_minimal()
+
+data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>% 
+    arrange(.threshold)
+
+best_threshold <- data_threshold %>% 
+    filter(.threshold %in% max_j_index_threshold) %>%
+    filter(.metric == "j_index") %>% 
+    pull(.threshold)
+
+data_preds_final <- svm_poly_final_fit %>%
+    augment(new_data = data_test) %>% 
+    mutate(.pred_class = make_two_class_pred(`.pred_Assumed alive`, levels(mortstat), 
+                                             threshold = best_threshold))
+
+data_preds_final %>% 
+    conf_mat(truth = mortstat, estimate = .pred_class)   # confusion matrix
+
+data_preds_final %>% 
+    accuracy(truth = mortstat, estimate = .pred_class) %>% 
+    bind_rows(data_preds_final %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+    bind_rows(data_preds_final %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))   # accuracy, sensitivity, specificity, auc
+
+data_preds_svm <- data_preds_final
+
 
 # compare different model performace
 
-logistic_roc <- logistic_fit %>% 
-    augment(new_data = data_test) %>% 
-    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
-    mutate(model = "Logistic Regression")
 
-lasso_roc <- lasso_final_fit %>% 
-    augment(new_data = data_test) %>% 
-    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
-    mutate(model = "Lasso Regression")
+pred_metr <- function(dataset) {
+    dataset %>% 
+        accuracy(truth = mortstat, estimate = .pred_class) %>% 
+        bind_rows(dataset %>% sens(truth = mortstat, estimate = .pred_class)) %>% 
+        bind_rows(dataset %>% spec(truth = mortstat, estimate = .pred_class)) %>% 
+        bind_rows(dataset %>% roc_auc(truth = mortstat, `.pred_Assumed alive`))
+} 
 
-rf_roc <- rf_fit %>%
-    augment(new_data = data_test) %>% 
-    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
-    mutate(model = "Random Forests")
+pred_metric <- list(logistic_fit %>% augment(new_data = data_test),
+     lasso_final_fit %>% augment(new_data = data_test),
+     rf_final_fit %>% augment(new_data = data_test),
+     xgb_final_fit %>% augment(new_data = data_test),
+     svm_poly_final_fit %>% augment(new_data = data_test)) %>% 
+    map2_dfr(c("logistic", "lasso", "random forest", "boosting", "svm"),
+             ~ pred_metr(.x) %>% 
+                 mutate(`.model` = .y))
+pred_metric %>% arrange(.metric)
 
-xgb_roc <- final_xgb_fit %>%
-    augment(new_data = data_test) %>% 
-    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
-    mutate(model = "Boosting trees")
+pred_metric %>% 
+    mutate(.metric = factor(.metric, levels = c("accuracy", "sens", "spec", "roc_auc"))) %>% 
+    mutate(.model = factor(.model, levels = c("logistic", "lasso", "random forest",
+                                              "boosting", "svm"))) %>% 
+    ggplot(aes(x = .model, y = .estimate, fill = .model)) +
+    geom_bar(stat="identity") +
+    facet_grid(. ~ .metric) +
+    scale_fill_manual(values = c("#fc636b", "#ffb900", "#3be8b0", "#1aafd0", "#6a67ce")) +
+    theme(panel.grid = element_line(colour = "grey92"),
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          axis.ticks = element_blank(), legend.background = element_blank(), 
+          legend.key = element_blank(), panel.background = element_blank(), 
+          legend.position="bottom",
+          panel.border = element_blank(), strip.background = element_blank(), 
+          plot.background = element_blank(), complete = TRUE)
 
-bind_rows(logistic_roc, lasso_roc, rf_roc, xgb_roc) %>% 
-    ggplot(aes(x = 1 - specificity, y = sensitivity, col = model)) + 
-    geom_path(lwd = 1.5, alpha = 0.8) +
+pred_metric_balance <- list(data_preds_logistic, data_preds_lasso, data_preds_rf, data_preds_xgb, data_preds_svm) %>% 
+    map2_dfr(c("logistic", "lasso", "random forest", "boosting", "svm"),
+             ~ pred_metr(.x) %>% 
+                 mutate(`.model` = .y))   # balancing sens and spec
+pred_metric_balance %>% arrange(.metric)
+
+pred_metric_balance %>% 
+    mutate(.metric = factor(.metric, levels = c("accuracy", "sens", "spec", "roc_auc"))) %>% 
+    mutate(.model = factor(.model, levels = c("logistic", "lasso", "random forest",
+                                              "boosting", "svm"))) %>% 
+    ggplot(aes(x = .model, y = .estimate, fill = .model)) +
+    geom_bar(stat="identity") +
+    facet_grid(. ~ .metric) +
+    scale_fill_manual(values = c("#fc636b", "#ffb900", "#3be8b0", "#1aafd0", "#6a67ce")) +
+    theme(panel.grid = element_line(colour = "grey92"),
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          axis.ticks = element_blank(), legend.background = element_blank(), 
+          legend.key = element_blank(), panel.background = element_blank(), 
+          legend.position="bottom",
+          panel.border = element_blank(), strip.background = element_blank(), 
+          plot.background = element_blank(), complete = TRUE)
+
+logistic_roc <- data_preds_logistic %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "logistic")
+
+lasso_roc <- data_preds_lasso %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+        mutate(model = "lasso")
+
+rf_roc <- data_preds_rf %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "random forest")
+
+xgb_roc <- data_preds_xgb %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "boosting")
+
+svm_roc <- data_preds_svm %>% 
+    roc_curve(truth = mortstat, estimate = `.pred_Assumed alive`) %>% 
+    mutate(model = "svm")
+
+bind_rows(logistic_roc, lasso_roc, rf_roc, xgb_roc, svm_roc) %>% 
+    mutate(model = factor(model, levels = c("logistic", "lasso", "random forest",
+                                            "boosting", "svm"))) %>% 
+    ggplot(aes(x = 1 - specificity, y = sensitivity, color = model)) + 
+    geom_path(lwd = 1.2, alpha = 0.8) +
     geom_abline(lty = 3) + 
-    coord_equal() + 
-    scale_color_viridis_d(option = "plasma", end = .6) +
-    theme_minimal()
+    coord_equal() +
+    scale_color_manual(values = c("#fc636b", "#ffb900", "#3be8b0", "#1aafd0", "#6a67ce")) +
+    theme(panel.grid = element_line(colour = "grey92"),
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          axis.ticks = element_blank(), legend.background = element_blank(), 
+          legend.key = element_blank(), panel.background = element_blank(), 
+          legend.position="bottom",
+          panel.border = element_blank(), strip.background = element_blank(), 
+          plot.background = element_blank(), complete = TRUE)   # roc
+
+
+
+
